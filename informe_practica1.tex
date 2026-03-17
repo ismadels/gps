@@ -1,0 +1,263 @@
+\documentclass[10pt]{article}
+
+% COMPILAR CON XeLaTeX o LuaLaTeX
+\usepackage{fontspec}
+\setmainfont{Fira Sans Light}
+\setsansfont{Fira Sans Light}
+\setmonofont{Fira Code}
+
+% IDIOMA
+\usepackage[spanish]{babel}
+
+% MÁRGENES
+\usepackage{geometry}
+\geometry{a4paper, margin=2.2cm}
+
+% COLORES
+\usepackage[dvipsnames]{xcolor}
+
+% MATEMÁTICAS
+\usepackage{amsmath, amssymb, amsthm}
+\usepackage{mathtools}
+
+% TEOREMAS
+\newtheorem{definition}{Definición}[section]
+\newtheorem{theorem}{Teorema}[section]
+\newtheorem{lemma}{Lema}[section]
+\newtheorem{proposition}{Proposición}[section]
+\newtheorem{corollary}{Corolario}[section]
+
+% GRÁFICOS
+\usepackage{tikz}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.18}
+
+% LISTADOS
+\usepackage{enumitem}
+
+% CÓDIGO
+\usepackage{listings}
+\lstdefinestyle{pythonEstilo}{
+    language=Python,
+    basicstyle=\ttfamily\small,
+    keywordstyle=\color{RoyalBlue}\bfseries,
+    commentstyle=\color{green!50!black},
+    stringstyle=\color{BrickRed},
+    numbers=none,
+    breaklines=true,
+    frame=single
+}
+
+% TABLAS
+\usepackage{booktabs}
+
+% OTROS
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{0.4em}
+
+
+%---------------------------------------------
+% DOCUMENTO
+%---------------------------------------------
+\begin{document}
+
+\begin{center}
+{\Large \bfseries Práctica 1 — Lectura y adquisición de datos de un receptor GPS}\[0.3em]
+{\normalsize Sistemas de Posicionamiento por Satélite (SISGPS) — Facultad de Ingeniería — 2025}\[0.2em]
+{\normalsize \textbf{Grupo:} \underline{\hspace{6cm}} \hfill \textbf{Fecha:} \today}
+\end{center}
+
+\vspace{0.5em}
+\tableofcontents
+\newpage
+
+
+\section{Introducción}
+En esta práctica se implementa una aplicación capaz de leer, a través de un puerto serie, tramas de posicionamiento según el estándar NMEA 0183 emitidas por un receptor GPS a 1~Hz. De dichas tramas se selecciona la sentencia \texttt{GGA} (\textit{Global Positioning System Fix Data}), que contiene la posición estimada por el receptor en coordenadas geográficas (latitud y longitud) junto con información de calidad del fix.
+
+A partir de esas coordenadas geográficas se realiza la transformación a coordenadas UTM (\textit{Universal Transverse Mercator}), obteniendo la proyección plana en coordenadas cartesianas \((X, Y)\) en metros.
+
+\section{Objetivo y entregables}
+\textbf{Objetivo:} leer tramas \texttt{GGA} desde un receptor GPS por puerto serie y convertir la posición a UTM mediante las ecuaciones de Gauss--Krüger (Transversa de Mercator) indicadas en el enunciado.
+
+\textbf{Entregables:}
+\begin{itemize}[leftmargin=1.2em]
+\item Código fuente de la aplicación (archivo \texttt{practica1.py}).
+\item Documento PDF con la especificación del trabajo desarrollado (este informe).
+\end{itemize}
+
+\section{Formato de la trama GGA (NMEA 0183)}
+El receptor emite tramas como:
+\begin{center}
+\texttt{\$GPGGA,123519,4807.038,N,01131.000,E,1,08,0.9,545.4,M,46.9,M,,*47}
+\end{center}
+
+En la Tabla~\ref{tab:gga} se resume el significado de los campos empleados por la aplicación.
+
+\begin{table}[h]
+\centering
+\renewcommand{\arraystretch}{1.15}
+\begin{tabular}{@{}ll@{}}
+\toprule
+\textbf{Campo} & \textbf{Descripción} \\
+\midrule
+\texttt{GGA} & Tipo de trama: \textit{Global Positioning System Fix Data} \\
+\texttt{hhmmss.ss} & Hora UTC del fix \\
+\texttt{lat, N/S} & Latitud en formato \texttt{ddmm.mmmm} y hemisferio \\
+\texttt{lon, E/W} & Longitud en formato \texttt{dddmm.mmmm} y hemisferio \\
+\texttt{fix} & Calidad del fix (0 = inválido, 1 = GPS, 2 = DGPS, \dots) \\
+\texttt{sat} & Número de satélites seguidos \\
+\texttt{HDOP} & Dilución horizontal de precisión \\
+\texttt{alt} & Altitud sobre el nivel medio del mar (m) \\
+\texttt{*CS} & Checksum XOR en hexadecimal (entre \texttt{\$} y \texttt{*}) \\
+\bottomrule
+\end{tabular}
+\caption{Campos relevantes de la sentencia GGA.}
+\label{tab:gga}
+\end{table}
+
+\subsection{Conversión de coordenadas NMEA a grados decimales}
+La latitud y longitud se reciben en formato NMEA:
+\begin{itemize}[leftmargin=1.2em]
+\item Latitud: \texttt{ddmm.mmmm}
+\item Longitud: \texttt{dddmm.mmmm}
+\end{itemize}
+
+La conversión a grados decimales se realiza como:
+\[
+\text{grados decimales} = \text{grados} + \frac{\text{minutos}}{60}
+\]
+Aplicando el signo según hemisferio: Sur (S) negativo y Oeste (W) negativo.
+
+\section{Modelo elipsoidal y parámetros}
+La transformación a UTM depende del elipsoide (datum). En la práctica se consideraron los dos elipsoides indicados en el enunciado: WGS84 y Europeo 1950 (ED50).
+
+\begin{center}
+\renewcommand{\arraystretch}{1.2}
+\begin{tabular}{@{}lrrrr@{}}
+\toprule
+\textbf{Elipsoide} & $a$ (m) & $f$ & $e'^2$ & $c$ (m) \\
+\midrule
+Europeo 1950 (ED50) & 6378388 & $1/297$ & 0.00672267 & 6399936.608 \\
+WGS84 & 6378137 & $1/298.25722$ & 0.00669437999013 & 6399593.626 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Donde:
+\begin{itemize}[leftmargin=1.2em]
+\item $a$ es el semieje mayor.
+\item $b$ es el semieje menor (se obtiene como $b=a(1-f)$).
+\item $f$ es el achatamiento $f = \dfrac{a-b}{a}$.
+\item $e'^2$ es el cuadrado de la segunda excentricidad $e'^2 = \dfrac{a^2-b^2}{b^2}$.
+\item $c$ es el radio polar de curvatura $c = \dfrac{a^2}{b}$.
+\end{itemize}
+
+\section{Transformación a UTM (Gauss--Krüger / Transversa de Mercator)}
+Sea $\varphi$ la latitud en radianes y $\lambda$ la longitud en radianes. El huso UTM se selecciona entre 1 y 60; para España se utiliza el \textbf{huso 30}.
+
+\subsection{Meridiano central del huso}
+\[
+\lambda_{0g} = \textit{Huso}\cdot 6 - 183^\circ
+\qquad
+\lambda_0 = \lambda_{0g}\cdot \frac{\pi}{180}
+\]
+
+\subsection{Ecuaciones usadas}
+En la implementación se emplean las expresiones del enunciado (forma estándar de TM/UTM). Se define:
+\[
+N = \frac{a}{\sqrt{1-e^2\sin^2\varphi}},\quad
+T = \tan^2\varphi,\quad
+C = e'^2\cos^2\varphi,\quad
+A = \cos\varphi\,(\lambda-\lambda_0)
+\]
+
+El arco meridiano:
+\[
+M = a\Big[\alpha_0\varphi - \alpha_2\sin(2\varphi) + \alpha_4\sin(4\varphi) - \alpha_6\sin(6\varphi)\Big]
+\]
+con coeficientes:
+\[
+\alpha_0=1-\frac{e^2}{4}-\frac{3e^4}{64}-\frac{5e^6}{256},\quad
+\alpha_2=\frac{3e^2}{8}+\frac{3e^4}{32}+\frac{45e^6}{1024},
+\]
+\[
+\alpha_4=\frac{15e^4}{256}+\frac{45e^6}{1024},\quad
+\alpha_6=\frac{35e^6}{3072}.
+\]
+
+Finalmente, con factor de escala $k_0=0.9996$ y falso este $E_0=500000$:
+\[
+E = k_0\,N\left(A+\frac{(1-T+C)A^3}{6}+\frac{(5-18T+T^2+72C-58e'^2)A^5}{120}\right)+E_0
+\]
+\[
+N_{\text{UTM}} = k_0\left[M+N\tan\varphi\left(\frac{A^2}{2}+\frac{(5-T+9C+4C^2)A^4}{24}+\frac{(61-58T+T^2+600C-330e'^2)A^6}{720}\right)\right]
+\]
+
+\section{Implementación del programa}
+La aplicación se implementó en Python. El programa admite dos modos de operación:
+\begin{itemize}[leftmargin=1.2em]
+\item \textbf{Modo puerto serie:} lectura del receptor GPS conectado al puerto \texttt{COM9} a \texttt{4800} baudios.
+\item \textbf{Modo archivo:} lectura de tramas desde \texttt{prueba.txt}.
+\end{itemize}
+
+Por simplicidad (según el enunciado y el caso de uso en España), el huso UTM está fijado a \textbf{30}.
+
+\subsection{Validación de checksum}
+Cada trama NMEA incluye un checksum XOR. Para evitar procesar líneas corruptas, se valida el checksum antes de parsear campos.
+
+\subsection{Salida}
+Para cada fix con calidad distinta de 0, se imprime:
+\begin{itemize}[leftmargin=1.2em]
+\item Hora UTC, calidad del fix, satélites, HDOP y altitud.
+\item Latitud/longitud en grados decimales.
+\item Coordenadas UTM en el huso 30 para \textbf{WGS84} y \textbf{ED50}.
+\end{itemize}
+
+\section{Resultados con datos de prueba}
+Se procesó el archivo \texttt{prueba.txt} (5 tramas GGA). A modo de ejemplo, para la primera trama:
+\begin{itemize}[leftmargin=1.2em]
+\item $\varphi = 40.386310^\circ$, $\lambda = -3.631081^\circ$ (W).
+\item UTM (WGS84): $E=446435.724$~m, $N=4470826.437$~m (30N).
+\item UTM (ED50): $E=446433.297$~m, $N=4470903.571$~m (30N).
+\end{itemize}
+
+La Tabla~\ref{tab:res} muestra el resumen de los 5 fixes del archivo.
+
+\begin{table}[h]
+\centering
+\renewcommand{\arraystretch}{1.1}
+\begin{tabular}{@{}lrr|rr@{}}
+\toprule
+\textbf{UTC} & \textbf{Lat (°)} & \textbf{Lon (°)} & \textbf{$E$ WGS84 (m)} & \textbf{$N$ WGS84 (m)} \\
+\midrule
+11:22:23.60 & 40.386310 & -3.631081 & 446435.724 & 4470826.437 \\
+11:22:23.70 & 40.386310 & -3.631082 & 446435.683 & 4470826.417 \\
+11:22:23.80 & 40.386310 & -3.631082 & 446435.675 & 4470826.423 \\
+11:22:23.90 & 40.386310 & -3.631081 & 446435.711 & 4470826.419 \\
+11:22:24.00 & 40.386310 & -3.631081 & 446435.692 & 4470826.428 \\
+\bottomrule
+\end{tabular}
+\caption{Resultados UTM para WGS84 (huso 30N) a partir de \texttt{prueba.txt}.}
+\label{tab:res}
+\end{table}
+
+\vspace{0.5em}
+Como comprobación adicional, se observó un desplazamiento sistemático entre WGS84 y ED50 (del orden de decenas de metros), coherente con el cambio de datum.
+
+\section{Cómo ejecutar}
+\begin{lstlisting}[style=pythonEstilo]
+# Modo archivo (lee prueba.txt)
+python practica1.py --file
+
+# Modo puerto serie (COM9, 4800 baudios)
+python practica1.py --port
+\end{lstlisting}
+
+\section{Dependencias}
+\begin{itemize}[leftmargin=1.2em]
+\item Python 3.
+\item \texttt{pyserial} (solo necesario en modo puerto): \texttt{pip install pyserial}.
+\end{itemize}
+
+\end{document}
