@@ -2,6 +2,7 @@
 
 % COMPILAR CON XeLaTeX
 \usepackage{fontspec}
+\usepackage{float}
 \IfFontExistsTF{Fira Sans Light}{
     \setmainfont{Fira Sans Light}
     \setsansfont{Fira Sans Light}
@@ -163,12 +164,23 @@ Esto permite reutilizar la misma aplicación para distintos escenarios sin modif
 La lectura por puerto serie se hace en un hilo para no bloquear la GUI. Se filtran tramas GGA, se valida el checksum y, si el fix es válido, se actualiza la pantalla.
 
 \subsection{Visualización tipo navegador}
-En pantalla se muestran:
+En la interfaz desarrollada se presentan los siguientes elementos en tiempo real:
+
 \begin{itemize}[leftmargin=1.2em]
-\item Marcador de posición (punto) y etiqueta.
-\item Traza simple del recorrido uniendo posiciones consecutivas.
-\item Panel con hora UTC, calidad del fix, satélites, HDOP, altitud y coordenadas.
+\item \textbf{Marcador de posición:} Representado por un punto y una etiqueta que identifica la ubicación actual del receptor.
+\item \textbf{Traza de recorrido:} Una línea continua que une las posiciones consecutivas para visualizar la trayectoria seguida.
+\item \textbf{Panel de telemetría:} Un cuadro informativo con la hora UTC, calidad del fix, número de satélites, HDOP, altitud y coordenadas actuales.
 \end{itemize}
+
+% Usamos [H] para que se quede exactamente aquí
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.7\textwidth]{imagen_prueba.jpeg}
+    \caption{Ejemplo del mapa de navegación implementado.}
+    \label{fig:ejemplo_navegador}
+\end{figure}
+
+Es importante destacar que la imagen mostrada en la Figura \ref{fig:ejemplo_navegador} es una \textbf{imagen de prueba} perteneciente a un entorno que no corresponde al del experimento principal. No obstante, dicho escenario fue fundamental durante la fase de desarrollo para validar la lógica de pintado, la persistencia de la traza y el correcto funcionamiento de la interfaz de usuario antes de pasar a los mapas definitivos.
 
 \section{Resultados y pruebas}
 Se ha comprobado el correcto funcionamiento del sistema en los tres mapas implementados. La posición GPS se representa correctamente dentro del área georreferenciada, y el sistema detecta adecuadamente cuando el punto se encuentra fuera de la imagen.
