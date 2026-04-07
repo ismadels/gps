@@ -1,0 +1,136 @@
+\documentclass[10pt]{article}
+
+% COMPILAR CON XeLaTeX o LuaLaTeX
+\usepackage{fontspec}
+\setmainfont{Fira Sans Light}
+\setsansfont{Fira Sans Light}
+\setmonofont{Fira Code}
+
+% IDIOMA
+\usepackage[spanish]{babel}
+
+% MÁRGENES
+\usepackage{geometry}
+\geometry{a4paper, margin=2.2cm}
+
+% COLORES
+\usepackage[dvipsnames]{xcolor}
+
+% MATEMÁTICAS
+\usepackage{amsmath, amssymb, amsthm}
+\usepackage{mathtools}
+\usepackage{multirow}
+
+% TEOREMAS
+\newtheorem{definition}{Definición}[section]
+\newtheorem{theorem}{Teorema}[section]
+\newtheorem{lemma}{Lema}[section]
+\newtheorem{proposition}{Proposición}[section]
+\newtheorem{corollary}{Corolario}[section]
+
+% GRÁFICOS
+\usepackage{tikz}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.18}
+
+% LISTADOS
+\usepackage{enumitem}
+
+% CÓDIGO
+\usepackage{listings}
+\lstdefinestyle{pythonEstilo}{
+    language=Python,
+    basicstyle=\ttfamily\small,
+    keywordstyle=\color{RoyalBlue}\bfseries,
+    commentstyle=\color{green!50!black},
+    stringstyle=\color{BrickRed},
+    numbers=none,
+    breaklines=true,
+    frame=single
+}
+
+% TABLAS
+\usepackage{booktabs}
+
+% OTROS
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{0.4em}
+\usepackage[hidelinks]{hyperref}
+\usepackage{graphicx}
+
+
+%---------------------------------------------
+% DOCUMENTO
+%---------------------------------------------
+\begin{document}
+
+\begin{center}
+{\Large \bfseries Práctica 2 - Desarrollo del mapa electrónico de la carretera}\\[0.3em]
+{\normalsize Grupo 1 - Sistemas Y Servicios De Navegación Gps 2026}\\[1.5em]
+\vspace{1em}
+\begin{center}
+\includegraphics[width=0.25\textwidth]{LogoETSISI.png}
+\end{center}
+
+\vspace{1em}
+
+\begin{tabular}{rl}
+\textbf{Docentes:} & Dr. Eugenio Naranjo y Dr. Francisco Serradilla \\[0.5em]
+\textbf{Integrantes:} & Ismael De Los Santos \\
+                      & Álex Pérez Carpente \\
+                      & Daniel León \\
+\end{tabular}
+\end{center}
+
+\vspace{0.5em}
+\tableofcontents
+\newpage
+
+\section{Introducción}
+El desarrollo de sistemas de navegación modernos requiere no solo la capacidad de adquirir datos de posición, sino también de transformar dicha información en un entorno visual intuitivo y funcional para el usuario. Esta segunda práctica representa un avance crítico en el proyecto incremental de la asignatura, cuyo propósito final es la creación de una aplicación de navegación para vehículos por carretera.
+
+Tras haber consolidado en la primera fase la lectura de tramas NMEA y la conversión matemática a coordenadas UTM, en esta etapa nos enfocamos en la integración de cartografía digital. El núcleo de este trabajo consiste en la extensión de la aplicación previa mediante el desarrollo de una interfaz gráfica (GUI) que proyecte, en tiempo real, la ubicación del receptor GPS sobre mapas electrónicos previamente calibrados. Para lograr una representación fiel a la realidad, se aborda el reto de la georreferenciación, vinculando puntos geográficos de plataformas como Google Earth con la matriz de píxeles de la pantalla. Este proceso es fundamental para garantizar que la navegación sea coherente, fluida y técnica, emulando las capacidades de un navegador comercial.
+
+\section{Objetivos}
+La realización de esta práctica se estructura bajo una serie de objetivos técnicos y operativos diseñados para garantizar la competencia en sistemas de navegación:
+
+\begin{itemize}[leftmargin=1.2em]
+    \item \textbf{Desarrollo de Interfaz Gráfica:} Extender la lógica de programación para incluir una ventana de visualización capaz de renderizar imágenes y marcadores dinámicos.
+    \item \textbf{Georreferenciación de Precisión:} Adquirir y calibrar capturas satelitales del Campus Sur de la UPM y del INSIA, estableciendo una relación matemática exacta entre coordenadas UTM y coordenadas de píxel.
+    \item \textbf{Sincronización en Tiempo Real:} Lograr que el marcador de posición en pantalla se desplace de forma coherente con el movimiento detectado por el receptor GPS a una frecuencia de 1 Hz.
+    \item \textbf{Implementación de Funciones de Navegación:} Diseñar elementos visuales similares a los de un dispositivo comercial, como el trazado de rutas, indicadores de telemetría y alertas de estado de señal.
+    \item \textbf{Validación en Entorno Real:} Preparar el sistema para su evaluación final mediante pruebas de campo en un vehículo instrumentado dentro de la pista de ensayo del INSIA.
+\end{itemize}
+
+\section{Metodología de Cartografía Digital}
+El proceso de creación del mapa electrónico se basa en la transición del dato geográfico al dato visual.
+
+\subsection{Obtención de la Imagen}
+La captura del mapa base se realizó mediante la plataforma \textbf{Google Earth}. Se seleccionaron las zonas de interés (Campus Sur e INSIA) y, utilizando las herramientas de medición de la plataforma, se extrajeron las coordenadas de latitud y longitud de los puntos de referencia necesarios para enmarcar el área de trabajo.
+
+\subsection{Relación de Medidas y Píxeles}
+Una vez definidas las dimensiones geográficas en grados y metros (UTM), se procedió a realizar una interpolación lineal para relacionar estas medidas con la resolución en píxeles de la imagen capturada. Este cálculo asegura que cualquier desplazamiento en metros sobre el terreno tenga una traslación proporcional y exacta en la pantalla.
+
+\section{Ecuaciones de Transformación}
+Se mantienen las bases de cálculo de la Práctica 1, utilizando las ecuaciones de Gauss-Krüger y el Datum WGS84:
+\begin{itemize}[leftmargin=1.2em]
+    \item \textbf{Semieje mayor ($a$):} 6378137 m.
+    \item \textbf{Achatamiento ($f$):} 1/298.25722.
+    \item \textbf{Huso UTM:} 30.
+\end{itemize}
+
+\section{Resultados y Pruebas}
+Actualmente, el sistema ha sido validado mediante simulaciones de trayectoria. No obstante, las pruebas físicas en el vehículo instrumentado del INSIA están programadas para la fase final de evaluación. Se reserva este apartado para documentar los resultados obtenidos en pista, incluyendo la precisión del posicionamiento y el comportamiento de la interfaz ante cambios de velocidad y dirección.
+
+\vspace{5cm} % Espacio reservado para resultados
+
+\section{Conclusiones}
+La integración de mapas georreferenciados supone un salto cualitativo en la aplicación, permitiendo una interpretación inmediata de los datos de navegación. La metodología empleada garantiza una base sólida para las pruebas en el mundo real, cumpliendo con los estándares de visualización requeridos.
+
+\section{Instrucciones de Ejecución}
+\begin{lstlisting}[style=pythonEstilo]
+# Ejecución de la aplicación con interfaz gráfica y mapa
+python practica2_gui.py
+\end{lstlisting}
+
+\end{document}

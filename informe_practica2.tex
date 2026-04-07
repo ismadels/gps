@@ -1,0 +1,168 @@
+\documentclass[10pt]{article}
+
+% COMPILAR CON XeLaTeX
+\usepackage{fontspec}
+\IfFontExistsTF{Fira Sans Light}{
+    \setmainfont{Fira Sans Light}
+    \setsansfont{Fira Sans Light}
+}{
+    % Si no están instaladas las fuentes, usamos un fallback común de TeX Live/MiKTeX
+    \setmainfont{Latin Modern Roman}
+    \setsansfont{Latin Modern Sans}
+}
+\IfFontExistsTF{Fira Code}{\setmonofont{Fira Code}}{\setmonofont{Latin Modern Mono}}
+
+% IDIOMA
+\usepackage[spanish]{babel}
+
+% MÁRGENES
+\usepackage{geometry}
+\geometry{a4paper, margin=2.2cm}
+
+% COLORES
+\usepackage[dvipsnames]{xcolor}
+
+% MATEMÁTICAS
+\usepackage{amsmath, amssymb}
+\usepackage{mathtools}
+
+% LISTADOS
+\usepackage{enumitem}
+
+% CÓDIGO
+\usepackage{listings}
+\lstdefinestyle{pythonEstilo}{
+        language=Python,
+        basicstyle=\ttfamily\small,
+        keywordstyle=\color{RoyalBlue}\bfseries,
+        commentstyle=\color{green!50!black},
+        stringstyle=\color{BrickRed},
+        numbers=none,
+        breaklines=true,
+        frame=single
+}
+
+% TABLAS
+\usepackage{booktabs}
+\usepackage{multirow}
+
+% OTROS
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{0.4em}
+\usepackage[hidelinks]{hyperref}
+\usepackage{graphicx}
+
+\begin{document}
+
+\begin{center}
+{\Large \bfseries Práctica 2 - Desarrollo del mapa electrónico de la carretera}\\[0.3em]
+{\normalsize Grupo 1 - Sistemas y Servicios de Navegación GPS (2026)}\\[1.2em]
+
+\IfFileExists{LogoETSISI.png}{\includegraphics[width=0.25\textwidth]{LogoETSISI.png}}{\vspace{2em}}
+
+\vspace{0.8em}
+
+\begin{tabular}{rl}
+\textbf{Docentes:} & Dr. Eugenio Naranjo y Dr. Francisco Serradilla \\[0.5em]
+\textbf{Integrantes:} & Ismael De Los Santos \\
+                                            & Álex Pérez Carpente \\
+                                            & Daniel León \\
+\end{tabular}
+\end{center}
+
+\vspace{0.5em}
+\tableofcontents
+\newpage
+
+\section{Introducción}
+En la Práctica 1 se implementó la lectura de tramas NMEA (sentencia GGA) y la conversión de latitud/longitud a coordenadas UTM. En esta segunda práctica extendemos esa aplicación para que, además de calcular la posición, la represente sobre un mapa en pantalla.
+
+El planteamiento se basa en dos capturas de imagen: una del Campus Sur y otra del INSIA. Cada imagen se georreferencia en función de sus límites y, con esa calibración, la posición del GPS se dibuja en tiempo real de forma coherente con el mapa.
+
+\section{Objetivo y entregables}
+\textbf{Objetivo:} extender la aplicación anterior para mostrar en una GUI la posición suministrada por el receptor GPS sobre imágenes georreferenciadas (Campus Sur e INSIA), con una visualización similar a la de un navegador comercial (marcador de posición, traza del recorrido y estado del fix).
+
+\textbf{Entregables:}
+\begin{itemize}[leftmargin=1.2em]
+\item Código fuente de la aplicación (archivo \texttt{practica2.py}).
+\item Imágenes base: \texttt{campus\_sur.jpg} y \texttt{gps\_insia.jpg}.
+\item Documento PDF con la descripción del trabajo (este informe).
+\end{itemize}
+
+\section{Obtención de las imágenes (Google Earth Pro)}
+Las capturas se obtuvieron con \textbf{Google Earth Pro} para poder controlar bien la vista. Para minimizar errores de georreferenciación, se preparó la escena con:
+\begin{itemize}[leftmargin=1.2em]
+\item Vista cenital (sin inclinación/perspectiva).
+\item Norte hacia arriba.
+\item Zoom fijo durante la captura.
+\end{itemize}
+
+Para sacar coordenadas de referencia se usaron \textbf{placemarks (pins)} en las esquinas del encuadre. Esas coordenadas (lat/lon, en formato DMS) son las que luego se utilizan como entrada y se convierten a UTM para definir los límites de la imagen. De esta forma, \textbf{los dos mapas} siguen exactamente el mismo flujo de calibración.
+
+\section{Georreferenciación (UTM $\rightarrow$ píxel)}
+Una vez elegida la imagen y su resolución, se define una correspondencia entre coordenadas UTM y píxel usando dos esquinas del rectángulo de la captura:
+\begin{itemize}[leftmargin=1.2em]
+\item TL (\emph{top-left}): esquina superior izquierda
+\item BR (\emph{bottom-right}): esquina inferior derecha
+\end{itemize}
+
+En el programa, las esquinas se guardan como lat/lon (DMS) y primero se convierten a UTM (WGS84, huso 30). Con esas UTM de las esquinas, la conversión del fix a píxel se hace con una interpolación lineal independiente por ejes:
+\[
+x = \frac{E - E_{TL}}{E_{BR}-E_{TL}}\,(W-1),\qquad
+y = \frac{N_{TL} - N}{N_{TL}-N_{BR}}\,(H-1)
+\]
+donde $(E,N)$ son las coordenadas UTM del fix, $(W,H)$ son el ancho/alto de la imagen original en píxeles, y los subíndices TL/BR son las esquinas usadas para calibrar.
+
+\subsection{Parámetros usados}
+En la Tabla~\ref{tab:maps} se resumen los parámetros de los dos mapas usados en el proyecto. En ambos casos se usan dos esquinas (TL/BR) en DMS como entrada para la conversión a UTM.
+
+\begin{table}[h]
+\centering
+\renewcommand{\arraystretch}{1.15}
+\begin{tabular}{@{}lll@{}}
+\toprule
+\textbf{Mapa} & \textbf{Imagen (px)} & \textbf{Esquinas usadas} \\
+\midrule
+Campus Sur & 1485$\times$964 & TL: 40°23'33.11"N, 3°38'9.48"W \\
+                    &                 & BR: 40°23'9.27"N, 3°37'20.90"W \\
+INSIA     & 1481$\times$1012 & TL: 40°23'16.8663"N, 3°38'4.5268"W \\
+          &                  & BR: 40°23'12.3787"N, 3°37'56.1685"W \\
+\bottomrule
+\end{tabular}
+\caption{Resumen de mapas y límites usados para la georreferenciación.}
+\label{tab:maps}
+\end{table}
+
+\section{Implementación}
+La aplicación se implementó en Python, reutilizando el parseo de GGA y la conversión a UTM de la práctica anterior. A nivel de interfaz se usa \texttt{tkinter} con un \texttt{Canvas} donde se dibuja la imagen y, encima, el marcador del GPS.
+
+\subsection{Lectura del GPS}
+La lectura por puerto serie se hace en un hilo para no bloquear la GUI. Se filtran tramas GGA, se valida el checksum y, si el fix es válido, se actualiza la pantalla.
+
+\subsection{Visualización tipo navegador}
+En pantalla se muestran:
+\begin{itemize}[leftmargin=1.2em]
+\item Marcador de posición (punto) y etiqueta.
+\item Traza simple del recorrido uniendo posiciones consecutivas.
+\item Panel con hora UTC, calidad del fix, satélites, HDOP, altitud y coordenadas.
+\end{itemize}
+
+\section{Resultados y pruebas}
+Por ahora la validación se ha hecho a nivel funcional (recepción de GGA, conversión UTM y representación en el mapa). Las pruebas finales con vehículo instrumentado en la pista del INSIA se dejarán para la sesión de evaluación, donde se podrá valorar la coherencia del trazado en movimiento real.
+
+\section{Cómo ejecutar}
+Dependencias:
+\begin{lstlisting}[style=pythonEstilo]
+python -m pip install pillow pyserial
+\end{lstlisting}
+
+Ejecución (elige el mapa con argumento):
+\begin{lstlisting}[style=pythonEstilo]
+# INSIA
+python practica2.py --map insia --port COM3 --baud 4800
+
+# Campus Sur
+python practica2.py --map campus --port COM3 --baud 4800
+\end{lstlisting}
+
+\end{document}
