@@ -77,10 +77,10 @@
 \section{Introducción}
 En la Práctica 1 se implementó la lectura de tramas NMEA (sentencia GGA) y la conversión de latitud/longitud a coordenadas UTM. En esta segunda práctica extendemos esa aplicación para que, además de calcular la posición, la represente sobre un mapa en pantalla.
 
-El planteamiento se basa en dos capturas de imagen: una del Campus Sur y otra del INSIA. Cada imagen se georreferencia en función de sus límites y, con esa calibración, la posición del GPS se dibuja en tiempo real de forma coherente con el mapa.
+El sistema desarrollado permite trabajar con múltiples mapas georreferenciados, concretamente tres escenarios: Campus Sur, INSIA y Vicálvaro. Cada imagen se calibra mediante coordenadas UTM de sus esquinas, permitiendo representar en tiempo real la posición del GPS sobre el mapa de forma coherente.
 
 \section{Objetivo y entregables}
-\textbf{Objetivo:} extender la aplicación anterior para mostrar en una GUI la posición suministrada por el receptor GPS sobre imágenes georreferenciadas (Campus Sur e INSIA), con una visualización similar a la de un navegador comercial (marcador de posición, traza del recorrido y estado del fix).
+\textbf{Objetivo:} extender la aplicación anterior para mostrar en una GUI la posición suministrada por el receptor GPS sobre imágenes georreferenciadas (Campus Sur, INSIA y Vicálvaro), con una visualización similar a la de un navegador comercial.
 
 \textbf{Entregables:}
 \begin{itemize}[leftmargin=1.2em]
@@ -90,28 +90,35 @@ El planteamiento se basa en dos capturas de imagen: una del Campus Sur y otra de
 \end{itemize}
 
 \section{Obtención de las imágenes (Google Earth Pro)}
-Las capturas se obtuvieron con \textbf{Google Earth Pro} para poder controlar bien la vista. Para minimizar errores de georreferenciación, se preparó la escena con:
+Las imágenes utilizadas se obtuvieron mediante capturas de Google Earth Pro, manteniendo:
+
 \begin{itemize}[leftmargin=1.2em]
-\item Vista cenital (sin inclinación/perspectiva).
-\item Norte hacia arriba.
-\item Zoom fijo durante la captura.
+\item Vista cenital (sin inclinación)
+\item Norte orientado hacia arriba
+\item Zoom fijo durante la captura
 \end{itemize}
 
-Para sacar coordenadas de referencia se usaron \textbf{placemarks (pins)} en las esquinas del encuadre. Esas coordenadas (lat/lon, en formato DMS) son las que luego se utilizan como entrada y se convierten a UTM para definir los límites de la imagen. De esta forma, \textbf{los dos mapas} siguen exactamente el mismo flujo de calibración.
+Una vez obtenidas las imágenes, se determinaron las coordenadas UTM de sus esquinas (superior izquierda e inferior derecha), que se emplean directamente para la georreferenciación.
 
 \section{Georreferenciación (UTM $\rightarrow$ píxel)}
-Una vez elegida la imagen y su resolución, se define una correspondencia entre coordenadas UTM y píxel usando dos esquinas del rectángulo de la captura:
+
+Para cada mapa se definen dos puntos de referencia:
+
 \begin{itemize}[leftmargin=1.2em]
 \item TL (\emph{top-left}): esquina superior izquierda
 \item BR (\emph{bottom-right}): esquina inferior derecha
 \end{itemize}
 
-En el programa, las esquinas se guardan como lat/lon (DMS) y primero se convierten a UTM (WGS84, huso 30). Con esas UTM de las esquinas, la conversión del fix a píxel se hace con una interpolación lineal independiente por ejes:
+Estas esquinas se expresan directamente en coordenadas UTM (sistema WGS84, huso 30), lo que simplifica el proceso de georreferenciación.
+
+La conversión de coordenadas UTM a píxel se realiza mediante interpolación lineal:
+
 \[
-x = \frac{E - E_{TL}}{E_{BR}-E_{TL}}\,(W-1),\qquad
+x = \frac{E - E_{TL}}{E_{BR}-E_{TL}}\,(W-1), \qquad
 y = \frac{N_{TL} - N}{N_{TL}-N_{BR}}\,(H-1)
 \]
-donde $(E,N)$ son las coordenadas UTM del fix, $(W,H)$ son el ancho/alto de la imagen original en píxeles, y los subíndices TL/BR son las esquinas usadas para calibrar.
+
+donde $(E,N)$ son las coordenadas UTM del GPS y $(W,H)$ el tamaño de la imagen en píxeles.
 
 \subsection{Parámetros usados}
 En la Tabla~\ref{tab:maps} se resumen los parámetros de los dos mapas usados en el proyecto. En ambos casos se usan dos esquinas (TL/BR) en DMS como entrada para la conversión a UTM.
@@ -119,22 +126,38 @@ En la Tabla~\ref{tab:maps} se resumen los parámetros de los dos mapas usados en
 \begin{table}[h]
 \centering
 \renewcommand{\arraystretch}{1.15}
-\begin{tabular}{@{}lll@{}}
+\begin{tabular}{@{}llll@{}}
 \toprule
-\textbf{Mapa} & \textbf{Imagen (px)} & \textbf{Esquinas usadas} \\
+\textbf{Mapa} & \textbf{Imagen (px)} & \textbf{UTM TL} & \textbf{UTM BR} \\
 \midrule
-Campus Sur & 1485$\times$964 & TL: 40°23'33.11"N, 3°38'9.48"W \\
-                    &                 & BR: 40°23'9.27"N, 3°37'20.90"W \\
-INSIA     & 1481$\times$1012 & TL: 40°23'16.8663"N, 3°38'4.5268"W \\
-          &                  & BR: 40°23'12.3787"N, 3°37'56.1685"W \\
+INSIA & 1481$\times$1012 & (446188.92, 4470994.44) & (446543.65, 4470741.85) \\
+
+Campus Sur & 1481$\times$1012 & (446470.66, 4471374.71) & (447074.56, 4470944.35) \\
+
+Vicálvaro & 1481$\times$1012 & (447623.30, 4473621.36) & (448850.08, 4472749.13) \\
+
 \bottomrule
 \end{tabular}
+\caption{Parámetros de georreferenciación de los mapas utilizados.}
+\label{tab:maps}
+\end{table}
 \caption{Resumen de mapas y límites usados para la georreferenciación.}
 \label{tab:maps}
 \end{table}
 
 \section{Implementación}
-La aplicación se implementó en Python, reutilizando el parseo de GGA y la conversión a UTM de la práctica anterior. A nivel de interfaz se usa \texttt{tkinter} con un \texttt{Canvas} donde se dibuja la imagen y, encima, el marcador del GPS.
+
+La aplicación se ha desarrollado en Python, reutilizando el procesamiento de datos GPS de la práctica anterior. Se ha diseñado una estructura modular basada en una clase de configuración (\texttt{MapConfig}) que permite definir distintos mapas de forma independiente.
+
+El usuario puede seleccionar el mapa a visualizar mediante argumentos en línea de comandos:
+
+\begin{lstlisting}[style=pythonEstilo]
+python practica2.py --map insia
+python practica2.py --map campus
+python practica2.py --map vicalvaro
+\end{lstlisting}
+
+Esto permite reutilizar la misma aplicación para distintos escenarios sin modificar el código.
 
 \subsection{Lectura del GPS}
 La lectura por puerto serie se hace en un hilo para no bloquear la GUI. Se filtran tramas GGA, se valida el checksum y, si el fix es válido, se actualiza la pantalla.
@@ -148,7 +171,13 @@ En pantalla se muestran:
 \end{itemize}
 
 \section{Resultados y pruebas}
+Se ha comprobado el correcto funcionamiento del sistema en los tres mapas implementados. La posición GPS se representa correctamente dentro del área georreferenciada, y el sistema detecta adecuadamente cuando el punto se encuentra fuera de la imagen.
+
+La inclusión de múltiples mapas demuestra la flexibilidad del sistema desarrollado y su capacidad para adaptarse a diferentes entornos geográficos.
+
 Por ahora la validación se ha hecho a nivel funcional (recepción de GGA, conversión UTM y representación en el mapa). Las pruebas finales con vehículo instrumentado en la pista del INSIA se dejarán para la sesión de evaluación, donde se podrá valorar la coherencia del trazado en movimiento real.
+
+
 
 \section{Cómo ejecutar}
 Dependencias:
