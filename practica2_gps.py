@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import math
 import threading
 import tkinter as tk
@@ -17,33 +18,10 @@ from PIL import Image, ImageTk
 # CONFIGURACIÓN GENERAL
 # =========================================================
 
-IMAGE_PATH = "gps_insia.jpg"   # Cambia esto por el nombre real de tu imagen
-DEFAULT_PORT = "COM3"      # Cambia esto si tu GPS está en otro puerto
+DEFAULT_PORT = "COM3"
 DEFAULT_BAUD = 4800
 DEFAULT_ZONE = 30
-
-# ---------------------------------------------------------
-# TAMAÑO REAL DE LA IMAGEN (el usado para georreferenciar)
-# ---------------------------------------------------------
-ORIG_IMAGE_WIDTH = 1481
-ORIG_IMAGE_HEIGHT = 1012
-
-# ---------------------------------------------------------
-# TAMAÑO DE VISUALIZACIÓN EN PANTALLA
-# ---------------------------------------------------------
-# Puedes cambiar DISPLAY_WIDTH si quieres más grande o más pequeño.
-DISPLAY_WIDTH = 1000
-DISPLAY_HEIGHT = int(ORIG_IMAGE_HEIGHT * DISPLAY_WIDTH / ORIG_IMAGE_WIDTH)
-
-# ---------------------------------------------------------
-# COORDENADAS UTM DE LAS ESQUINAS DE LA IMAGEN
-# ---------------------------------------------------------
-E_TL = 446139.19
-N_TL = 4471018.19
-
-E_BR = 446335.26
-N_BR = 4470878.41
-
+DEFAULT_DISPLAY_WIDTH = 1000
 
 ELLIPSOIDS = {
     "WGS84": {"name": "WGS84", "a": 6378137.0, "f": 1.0 / 298.257223563},
@@ -64,7 +42,7 @@ FIX_QUALITY = {
 
 
 # =========================================================
-# DATACLASS GGA
+# DATOS GGA
 # =========================================================
 
 @dataclass
@@ -76,6 +54,82 @@ class GGAData:
     altitude_m: float
     latitude_deg: float | None
     longitude_deg: float | None
+
+
+# =========================================================
+# CONFIGURACIÓN DE MAPAS
+# =========================================================
+
+@dataclass(frozen=True)
+class MapConfig:
+    key: str
+    title: str
+    image_path: str
+    orig_width: int
+    orig_height: int
+    display_width: int
+    zone: int
+    e_tl: float
+    n_tl: float
+    e_br: float
+    n_br: float
+
+
+def map_config_insia(display_width: int) -> MapConfig:
+    """
+    INSIA con UTM fijas medidas por vosotros.
+    TL = esquina superior izquierda
+    BR = esquina inferior derecha
+    """
+    return MapConfig(
+        key="insia",
+        title="INSIA",
+        image_path="gps_insia.jpg",
+        orig_width=1481,
+        orig_height=1012,
+        display_width=display_width,
+        zone=DEFAULT_ZONE,
+        e_tl=446188.92,
+        n_tl=4470994.44,
+        e_br=446543.65,
+        n_br=4470741.85,
+    )
+
+
+def map_config_campus_sur(display_width: int) -> MapConfig:
+    """
+    Campus Sur con UTM fijas.
+    CAMBIA estos valores por los de TU imagen final.
+    """
+    return MapConfig(
+        key="campus",
+        title="Campus Sur",
+        image_path="campus_sur.jpg",
+        orig_width=1481,  
+        orig_height=1012,    
+        display_width=display_width,
+        zone=DEFAULT_ZONE,
+        e_tl=446470.66,   
+        n_tl=4471374.71,   
+        e_br=447074.56,  
+        n_br=4470944.35,   
+    )
+
+
+def map_config_vicalvaro(display_width: int) -> MapConfig:
+    return MapConfig(
+        key="vicalvaro",
+        title="Vicálvaro",
+        image_path="vicalvaro.jpg",
+        orig_width=1481,  
+        orig_height=1012,   
+        display_width=display_width,
+        zone=DEFAULT_ZONE,
+        e_tl=447623.30,         
+        n_tl=4473621.36,          
+        e_br=448850.08,          
+        n_br=4472749.13,          
+    )
 
 
 # =========================================================
@@ -273,62 +327,66 @@ def geo_to_utm(
 
 
 # =========================================================
-# CONVERSIÓN UTM -> PIXEL EN IMAGEN ORIGINAL
+# UTM -> PÍXEL
 # =========================================================
 
-def utm_to_pixel_original(E: float, N: float) -> tuple[int, int]:
-    x = ((E - E_TL) / (E_BR - E_TL)) * (ORIG_IMAGE_WIDTH - 1)
-    y = ((N_TL - N) / (N_TL - N_BR)) * (ORIG_IMAGE_HEIGHT - 1)
+def utm_to_pixel_original(cfg: MapConfig, E: float, N: float) -> tuple[int, int]:
+    x = ((E - cfg.e_tl) / (cfg.e_br - cfg.e_tl)) * (cfg.orig_width - 1)
+    y = ((cfg.n_tl - N) / (cfg.n_tl - cfg.n_br)) * (cfg.orig_height - 1)
     return int(round(x)), int(round(y))
 
 
-def original_pixel_to_display(x: int, y: int) -> tuple[int, int]:
-    x_disp = int(round(x * DISPLAY_WIDTH / ORIG_IMAGE_WIDTH))
-    y_disp = int(round(y * DISPLAY_HEIGHT / ORIG_IMAGE_HEIGHT))
+def original_pixel_to_display(cfg: MapConfig, x: int, y: int) -> tuple[int, int]:
+    display_height = int(cfg.orig_height * cfg.display_width / cfg.orig_width)
+    x_disp = int(round(x * cfg.display_width / cfg.orig_width))
+    y_disp = int(round(y * display_height / cfg.orig_height))
     return x_disp, y_disp
 
 
-def inside_original_image(x: int, y: int) -> bool:
-    return 0 <= x < ORIG_IMAGE_WIDTH and 0 <= y < ORIG_IMAGE_HEIGHT
+def inside_original_image(cfg: MapConfig, x: int, y: int) -> bool:
+    return 0 <= x < cfg.orig_width and 0 <= y < cfg.orig_height
 
 
 # =========================================================
-# INTERFAZ GRÁFICA
+# INTERFAZ
 # =========================================================
 
 class GPSMapApp:
-    def __init__(self, root: tk.Tk):
+    def __init__(self, root: tk.Tk, cfg: MapConfig):
         self.root = root
-        self.root.title("Práctica 2 - Mapa INSIA con GPS")
+        self.cfg = cfg
+        self.display_height = int(cfg.orig_height * cfg.display_width / cfg.orig_width)
+        self.root.title(f"Práctica 2 - {cfg.title} con GPS")
 
-        # ---------- Frame principal ----------
         main_frame = tk.Frame(root)
         main_frame.pack(fill="both", expand=True)
 
-        # ---------- Frame izquierdo (mapa) ----------
         map_frame = tk.Frame(main_frame)
         map_frame.pack(side=tk.LEFT, padx=10, pady=10)
 
-        # Cargar imagen y escalarla para mostrarla en pantalla
-        self.base_image_pil = Image.open(IMAGE_PATH)
-        self.base_image_pil = self.base_image_pil.resize((DISPLAY_WIDTH, DISPLAY_HEIGHT))
+        try:
+            self.base_image_pil = Image.open(cfg.image_path)
+        except Exception as exc:
+            raise RuntimeError(
+                f"No se pudo abrir la imagen del mapa: {cfg.image_path}. "
+                f"Pon la imagen en el mismo directorio del script. Detalle: {exc}"
+            ) from exc
+
+        self.base_image_pil = self.base_image_pil.resize((cfg.display_width, self.display_height))
         self.base_image_tk = ImageTk.PhotoImage(self.base_image_pil)
 
-        # Canvas con tamaño de visualización
         self.canvas = tk.Canvas(
             map_frame,
-            width=DISPLAY_WIDTH,
-            height=DISPLAY_HEIGHT,
+            width=cfg.display_width,
+            height=self.display_height,
             bg="white",
             highlightthickness=1,
             highlightbackground="black"
         )
         self.canvas.pack()
 
-        # Dibujar imagen una sola vez
         self.canvas.create_image(0, 0, anchor="nw", image=self.base_image_tk)
 
-        # Marcador GPS
         self.gps_radius = 8
         self.gps_marker = self.canvas.create_oval(
             -100, -100, -100, -100,
@@ -344,11 +402,9 @@ class GPSMapApp:
             font=("Arial", 10, "bold")
         )
 
-        # Para dejar traza del recorrido
         self.last_x_disp = None
         self.last_y_disp = None
 
-        # ---------- Frame derecho (información) ----------
         info_frame = tk.Frame(main_frame, padx=10, pady=10)
         info_frame.pack(side=tk.RIGHT, fill=tk.Y)
 
@@ -364,7 +420,7 @@ class GPSMapApp:
         self.pix_var = tk.StringVar(value="Píxel original: -")
         self.pix_disp_var = tk.StringVar(value="Píxel pantalla: -")
         self.size_var = tk.StringVar(
-            value=f"Imagen mostrada: {DISPLAY_WIDTH} x {DISPLAY_HEIGHT}"
+            value=f"Imagen mostrada: {cfg.display_width} x {self.display_height}"
         )
 
         vars_to_show = [
@@ -414,19 +470,18 @@ class GPSMapApp:
             gga.latitude_deg,
             gga.longitude_deg,
             "WGS84",
-            DEFAULT_ZONE
+            self.cfg.zone
         )
 
-        self.utm_var.set(f"UTM: E={E:.2f}, N={N:.2f}, Zona={DEFAULT_ZONE}{hemisphere}")
+        self.utm_var.set(f"UTM: E={E:.2f}, N={N:.2f}, Zona={self.cfg.zone}{hemisphere}")
 
-        x_orig, y_orig = utm_to_pixel_original(E, N)
+        x_orig, y_orig = utm_to_pixel_original(self.cfg, E, N)
         self.pix_var.set(f"Píxel original: x={x_orig}, y={y_orig}")
 
-        if inside_original_image(x_orig, y_orig):
-            x_disp, y_disp = original_pixel_to_display(x_orig, y_orig)
+        if inside_original_image(self.cfg, x_orig, y_orig):
+            x_disp, y_disp = original_pixel_to_display(self.cfg, x_orig, y_orig)
             self.pix_disp_var.set(f"Píxel pantalla: x={x_disp}, y={y_disp}")
 
-            # Dibujar traza del recorrido
             if self.last_x_disp is not None and self.last_y_disp is not None:
                 self.canvas.create_line(
                     self.last_x_disp,
@@ -459,14 +514,16 @@ class GPSMapApp:
 
 
 # =========================================================
-# HILO DE LECTURA SERIE
+# LECTURA SERIE
 # =========================================================
 
 def serial_worker(app: GPSMapApp, port: str, baudrate: int) -> None:
     if serial is None:
         app.root.after(
             0,
-            lambda: app.status_var.set("ERROR: falta pyserial. Instala: pip install pyserial")
+            lambda: app.status_var.set(
+                "ERROR: falta pyserial en ESTE entorno. Instala con: python -m pip install pyserial"
+            )
         )
         return
 
@@ -505,12 +562,37 @@ def serial_worker(app: GPSMapApp, port: str, baudrate: int) -> None:
 # =========================================================
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description="Práctica 2 - mapa electrónico con GPS")
+    parser.add_argument(
+    "--map",
+    choices=["insia", "campus", "vicalvaro"],
+    default="insia",
+    help="Mapa a mostrar: insia, campus o vicalvaro",
+    )
+
+    parser.add_argument("--port", default=DEFAULT_PORT, help="Puerto serie (ej: COM3)")
+    parser.add_argument("--baud", type=int, default=DEFAULT_BAUD, help="Baudios (ej: 4800)")
+    parser.add_argument(
+        "--display-width",
+        type=int,
+        default=DEFAULT_DISPLAY_WIDTH,
+        help="Ancho del mapa mostrado en píxeles",
+    )
+    args = parser.parse_args()
+
+    if args.map == "insia":
+        cfg = map_config_insia(args.display_width)
+    elif args.map == "campus":
+        cfg = map_config_campus_sur(args.display_width)
+    else:
+        cfg = map_config_vicalvaro(args.display_width)
+
     root = tk.Tk()
-    app = GPSMapApp(root)
+    app = GPSMapApp(root, cfg)
 
     thread = threading.Thread(
         target=serial_worker,
-        args=(app, DEFAULT_PORT, DEFAULT_BAUD),
+        args=(app, args.port, args.baud),
         daemon=True
     )
     thread.start()
