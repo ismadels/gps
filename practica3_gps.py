@@ -880,7 +880,8 @@ def serial_worker(app: GPSMultiMapApp, port: str, baudrate: int) -> None:
                 app.root.after(0, lambda data=gga: app.update_position(data))
 
     except Exception as exc:
-        app.root.after(0, lambda: app.status_var.set(f"Error serie: {exc}"))
+        msg = str(exc)
+        app.root.after(0, lambda: app.status_var.set(f"Error serie: {msg}"))
 
 
 # =========================================================
