@@ -126,7 +126,7 @@ def map_config_campus_sur(display_width: int) -> MapConfig:
         n_tl=4471356.42,
         e_br=446992.21,
         n_br=4470961.96,
-        has_speed_limits=False,
+        has_speed_limits=True,
         track_path=None,
     )
 
