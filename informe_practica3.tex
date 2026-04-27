@@ -1,0 +1,290 @@
+\documentclass[10pt]{article}
+
+% COMPILAR CON pdfLaTeX
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+
+% IDIOMA
+\usepackage[spanish]{babel}
+
+% MÁRGENES
+\usepackage{geometry}
+\geometry{a4paper, margin=2.2cm}
+
+% COLORES
+\usepackage[dvipsnames]{xcolor}
+
+% MATEMÁTICAS
+\usepackage{amsmath, amssymb}
+\usepackage{mathtools}
+
+% LISTADOS
+\usepackage{enumitem}
+
+% CÓDIGO
+\usepackage{listings}
+\lstdefinestyle{pythonEstilo}{
+        language=Python,
+        basicstyle=\ttfamily\small,
+        keywordstyle=\color{RoyalBlue}\bfseries,
+        commentstyle=\color{green!50!black},
+        stringstyle=\color{BrickRed},
+        numbers=none,
+        breaklines=true,
+        frame=single
+}
+
+% TABLAS
+\usepackage{booktabs}
+\usepackage{multirow}
+
+% OTROS
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{0.4em}
+\usepackage[hidelinks]{hyperref}
+\usepackage{graphicx}
+
+\begin{document}
+
+\begin{center}
+{\Large \bfseries Práctica 3 - Integración del sistema de aviso al conductor}\\[0.3em]
+{\normalsize Grupo 1 - Sistemas y Servicios de Navegación GPS (2026)}\\[1.2em]
+
+\IfFileExists{LogoETSISI.png}{\includegraphics[width=0.25\textwidth]{LogoETSISI.png}}{\vspace{2em}}
+
+\vspace{0.8em}
+
+\begin{tabular}{rl}
+\textbf{Docentes:} & Dr. Eugenio Naranjo y Dr. Francisco Serradilla \\[0.5em]
+\textbf{Integrantes:} & Ismael De Los Santos \\
+                      & Álex Pérez Carpente \\
+                      & Daniel León \\
+\end{tabular}
+\end{center}
+
+\vspace{0.5em}
+\tableofcontents
+\newpage
+
+% ============================================================
+\section{Introducción}
+% ============================================================
+
+En las prácticas anteriores se desarrolló un sistema de posicionamiento GPS con representación visual sobre mapas georreferenciados. En esta tercera práctica se añade una capa de inteligencia al sistema: la integración de un \textbf{mapa electrónico de velocidades} para la pista de ensayo del INSIA, y un \textbf{sistema de aviso al conductor} que compara en cada instante la velocidad real del vehículo con el límite correspondiente al tramo en que se encuentra, alertando visualmente cuando dicho límite es superado, estos limites correspondientes a la ubicación en el centro de INSIA se encuentran guardados en un archivo .txt que el programa tendra que leer y asi comparar las velocidades.
+
+Un aspecto clave del sistema es su capacidad para detectar el \textbf{sentido de la marcha} (horario o antihorario) de forma automática, garantizando así la asignación correcta del límite de velocidad independientemente de la dirección de circulación.
+
+% ============================================================
+\section{Objetivo y entregables}
+% ============================================================
+
+\textbf{Objetivo:} extender la aplicación de la Práctica 2 para integrar el mapa electrónico de la pista de ensayo del INSIA, comparar la velocidad GPS del vehículo con el límite del tramo activo, detectar el sentido de circulación y avisar al conductor mediante una interfaz gráfica clara cuando se supere la velocidad permitida.
+
+\textbf{Entregables:}
+\begin{itemize}[leftmargin=1.2em]
+    \item Código fuente de la aplicación (\texttt{practica3\_gps.py}).
+    \item Mapa electrónico de velocidades (\texttt{Mapa\_INSIA2.txt}).
+    \item Documento PDF con la descripción del trabajo desarrollado (este informe).
+\end{itemize}
+
+% ============================================================
+\section{Mapa electrónico de velocidades}
+% ============================================================
+
+\subsection{Formato del fichero}
+
+El mapa electrónico de la pista del INSIA se suministra en el fichero \texttt{Mapa\_INSIA2.txt}. Cada línea del fichero contiene tres valores separados por espacios o comas:
+
+\[
+\texttt{UTM\_Norte} \quad \texttt{UTM\_Este} \quad \texttt{Velocidad\_Máxima (km/h)}
+\]
+
+Cada línea representa un punto de referencia de la pista, ordenado de forma secuencial siguiendo el trazado en sentido horario. El fichero debe contener al menos 3 puntos para que el sistema pueda inferir el sentido de circulación.
+
+\subsection{Carga y validación}
+
+La función \texttt{load\_track(path)} lee el fichero línea a línea, convirtiendo cada entrada en un objeto \texttt{TrackPoint}:
+
+\begin{lstlisting}[style=pythonEstilo]
+@dataclass
+class TrackPoint:
+    north: float
+    east: float
+    vmax: float
+\end{lstlisting}
+
+Se valida que cada línea contenga exactamente tres valores numéricos y que el número total de puntos sea suficiente para el cálculo de dirección. En caso de error, la aplicación lanza una excepción descriptiva con el número de línea problemática.
+
+% ============================================================
+\section{Cálculo de velocidad GPS}
+% ============================================================
+
+El receptor GPS (sentencia GGA) no proporciona directamente la velocidad del vehículo. Esta se calcula a partir de la distancia euclidiana recorrida entre dos posiciones UTM consecutivas dividida entre el tiempo transcurrido:
+
+\[
+v = \frac{\sqrt{(E_2 - E_1)^2 + (N_2 - N_1)^2}}{\Delta t} \times 3{,}6 \quad [\text{km/h}]
+\]
+
+donde $(E_1, N_1)$ y $(E_2, N_2)$ son las coordenadas UTM de dos posiciones sucesivas y $\Delta t$ el intervalo en segundos medido con el reloj del sistema.
+
+Para reducir el ruido propio de las medidas GPS se aplica un \textbf{suavizado por media móvil} sobre una ventana de 5 muestras:
+
+\[
+\bar{v}_k = \frac{1}{5} \sum_{i=k-4}^{k} v_i
+\]
+
+Esta decisión de diseño equilibra la reactividad del sistema con la estabilidad de la lectura mostrada al conductor.
+
+% ============================================================
+\section{Detección del sentido de la marcha}
+% ============================================================
+
+Uno de los requisitos fundamentales de la práctica es que el sistema funcione correctamente tanto en sentido horario como antihorario. Para ello se implementa una detección automática del sentido de circulación basada en el \textbf{producto escalar} entre el vector de movimiento del vehículo y los vectores tangentes al trazado.
+
+Dado el punto del mapa más cercano al vehículo (índice $i$), se definen:
+
+\begin{itemize}[leftmargin=1.2em]
+    \item \textbf{Vector hacia adelante} (sentido horario): dirección del punto $i$ al punto $i+1$.
+    \item \textbf{Vector hacia atrás} (sentido antihorario): dirección del punto $i$ al punto $i-1$.
+\end{itemize}
+
+El vector de movimiento del vehículo $\vec{m} = (E_2 - E_1,\; N_2 - N_1)$ se compara con ambos mediante el producto escalar. El sentido se infiere eligiendo el vector con mayor proyección:
+
+\[
+\text{sentido} = \begin{cases}
++1 & \text{si } \vec{m} \cdot \vec{f} \geq \vec{m} \cdot \vec{b} \quad \text{(horario)} \\
+-1 & \text{en caso contrario} \quad \text{(antihorario)}
+\end{cases}
+\]
+
+La detección solo se actualiza cuando la norma del vector de movimiento supera 0{,}20 m, evitando así actualizaciones espurias cuando el vehículo está parado o casi parado.
+
+% ============================================================
+\section{Búsqueda del punto más cercano}
+% ============================================================
+
+Para determinar el límite de velocidad aplicable en cada posición, el sistema busca el punto del mapa electrónico más próximo al vehículo en coordenadas UTM (distancia euclídea mínima).
+
+Con el fin de reducir el coste computacional y evitar saltos entre puntos distantes en pistas con solapamiento geométrico, la búsqueda se restringe a una \textbf{ventana de candidatos} en torno al último punto conocido:
+
+\begin{lstlisting}[style=pythonEstilo]
+def circular_indices(center, size, back, forward, direction):
+    # Genera indices circulares [center-back, ..., center+forward]
+    # ajustados segun el sentido de la marcha
+\end{lstlisting}
+
+Los parámetros utilizados son \texttt{back=8} y \texttt{forward=20}, lo que permite anticipar la búsqueda en el sentido de avance del vehículo. En el arranque inicial (primera posición recibida), se realiza una búsqueda exhaustiva entre todos los puntos del mapa.
+
+% ============================================================
+\section{Sistema de aviso al conductor}
+% ============================================================
+
+\subsection{Lógica de estados}
+
+Una vez conocida la velocidad actual $v$ y el límite del tramo $v_{max}$, el sistema clasifica la situación en tres estados:
+
+\begin{table}[h]
+\centering
+\renewcommand{\arraystretch}{1.2}
+\begin{tabular}{@{}lll@{}}
+\toprule
+\textbf{Estado} & \textbf{Condición} & \textbf{Color} \\
+\midrule
+Velocidad correcta    & $v < 0{,}9 \cdot v_{max}$  & Verde    \\
+Cerca del límite      & $0{,}9 \cdot v_{max} \leq v \leq 1{,}1 \cdot v_{max}$ & Amarillo \\
+Exceso de velocidad   & $v > 1{,}1 \cdot v_{max}$  & Rojo     \\
+Sin límite disponible & mapa sin velocidades        & Azul     \\
+\bottomrule
+\end{tabular}
+\caption{Estados del sistema de aviso al conductor y umbrales de activación.}
+\label{tab:estados}
+\end{table}
+
+\subsection{Interfaz gráfica}
+
+La interfaz sigue el modelo indicado en el enunciado (Figura 3 de la guía de prácticas): tres zonas de color que se activan de forma exclusiva según el estado de velocidad, con la velocidad actual siempre visible en el centro.
+
+La ventana principal se divide en dos áreas:
+
+\begin{itemize}[leftmargin=1.2em]
+    \item \textbf{Panel izquierdo}: mapa georreferenciado con el trazado de referencia del track (en gris), la traza recorrida por el vehículo (coloreada según el estado de velocidad) y el marcador de posición actual.
+    \item \textbf{Panel derecho}: visualizador de velocidad (velocímetro de barras de color), límite del tramo activo, indicador de sentido de la marcha y panel con los datos técnicos del GPS (hora UTC, fix, satélites, HDOP, altitud, coordenadas y punto del mapa electrónico).
+\end{itemize}
+
+La traza recorrida se dibuja en el color correspondiente al estado de velocidad en cada momento, permitiendo al operador revisar \textit{a posteriori} los tramos donde se superó el límite.
+
+% ============================================================
+\section{Implementación}
+% ============================================================
+
+La aplicación se ha desarrollado en Python 3.11, manteniendo la estructura modular de las prácticas anteriores y añadiendo los nuevos módulos necesarios para la práctica 3.
+
+\subsection{Estructura del código}
+
+\begin{itemize}[leftmargin=1.2em]
+    \item \textbf{Configuración y datos}: clases \texttt{MapConfig} (ampliada con \texttt{has\_speed\_limits} y \texttt{track\_path}) y \texttt{TrackPoint}.
+    \item \textbf{Carga del mapa electrónico}: función \texttt{load\_track()}.
+    \item \textbf{NMEA/GGA}: sin cambios respecto a prácticas anteriores.
+    \item \textbf{Geodesia}: sin cambios respecto a prácticas anteriores.
+    \item \textbf{Cálculos}: módulo con \texttt{compute\_speed\_kmh()}, \texttt{nearest\_track\_index()}, \texttt{infer\_direction\_from\_motion()}, \texttt{circular\_indices()} y \texttt{speed\_state()}.
+    \item \textbf{Interfaz}: clase \texttt{GPSMultiMapApp} (refactorización de \texttt{GPSMapApp}).
+    \item \textbf{Lectura serie}: hilo \texttt{serial\_worker()} sin cambios estructurales.
+\end{itemize}
+
+\subsection{Ejecución}
+
+Dependencias necesarias:
+\begin{lstlisting}[style=pythonEstilo]
+python -m pip install pillow pyserial
+\end{lstlisting}
+
+Ejecución desde línea de comandos:
+\begin{lstlisting}[style=pythonEstilo]
+# Pista INSIA (con limites de velocidad)
+python practica3_gps.py --map insia --port COM3 --baud 4800
+
+# Campus Sur (sin limites de velocidad)
+python practica3_gps.py --map campus --port COM3 --baud 4800
+
+# Vicalvaro (sin limites de velocidad)
+python practica3_gps.py --map vicalvaro --port COM3 --baud 4800
+
+# Ruta alternativa al mapa electronico
+python practica3_gps.py --map insia --track ruta/al/mapa.txt --port COM3
+\end{lstlisting}
+
+El argumento \texttt{--map campus} o \texttt{--map vicalvaro} activa el modo sin límites de velocidad, mostrando igualmente la velocidad calculada pero sin evaluación de excesos.
+
+% ============================================================
+\section{Resultados y análisis experimental}
+% ============================================================
+
+\textit{Esta sección se completará tras la realización de las pruebas con el vehículo instrumentado en la pista de ensayo del INSIA.}
+
+
+\subsection{Comportamiento del sistema de aviso}
+
+\textit{Describir aquí el comportamiento observado del sistema de aviso al conductor durante la prueba: tiempo de reacción del aviso, coherencia entre la velocidad mostrada y la percibida, correcta detección del sentido de la marcha, etc.}
+
+
+% ============================================================
+\section{Conclusiones}
+% ============================================================
+
+\textit{Esta sección se completará tras la realización de las pruebas experimentales.}
+
+\vspace{1em}
+
+El sistema desarrollado amplía la aplicación de la Práctica 2 con las siguientes capacidades nuevas:
+
+\begin{itemize}[leftmargin=1.2em]
+    \item Carga y procesamiento del mapa electrónico de velocidades en formato UTM.
+    \item Cálculo de velocidad GPS por diferenciación de posiciones consecutivas con suavizado por media móvil.
+    \item Detección automática del sentido de la marcha mediante producto escalar.
+    \item Búsqueda eficiente del tramo activo mediante ventana de candidatos circular.
+    \item Interfaz de aviso al conductor con tres estados visuales (verde/amarillo/rojo) conforme al modelo especificado en el enunciado.
+    \item Compatibilidad con los tres mapas de las prácticas anteriores, activando el sistema de límites únicamente en el escenario INSIA.
+\end{itemize}
+
+
+\end{document}
