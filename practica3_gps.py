@@ -565,23 +565,13 @@ class GPSMultiMapApp:
             justify="center"
         ).pack(pady=(5, 12), fill="x")
 
-        self.big_speed_var = tk.StringVar(value="0.0 km/h")
-        tk.Label(
-            panel_frame,
-            textvariable=self.big_speed_var,
-            font=("Arial", 30, "bold"),
-            fg="#111111",
-            bg="#f7f7f7"
-        ).pack(pady=(0, 10))
+        
 
         self.limit_var = tk.StringVar(value="Límite actual: no disponible")
         self.alert_var = tk.StringVar(value="Estado: esperando datos GPS")
         self.direction_var = tk.StringVar(value="Sentido: -")
-        self.map_mode_var = tk.StringVar(
-            value="Modo: con límites INSIA" if self.cfg.has_speed_limits else "Modo: sin límites de velocidad"
-        )
 
-        tk.Label(panel_frame, textvariable=self.map_mode_var, font=("Arial", 13, "bold"), bg="#f7f7f7", wraplength=470, justify="center").pack(pady=2, fill="x")
+        
         tk.Label(panel_frame, textvariable=self.limit_var, font=("Arial", 14, "bold"), bg="#f7f7f7", wraplength=470, justify="center").pack(pady=3, fill="x")
         tk.Label(panel_frame, textvariable=self.alert_var, font=("Arial", 13), bg="#f7f7f7", wraplength=470, justify="center").pack(pady=3, fill="x")
         tk.Label(panel_frame, textvariable=self.direction_var, font=("Arial", 12), bg="#f7f7f7", wraplength=470, justify="center").pack(pady=3, fill="x")
