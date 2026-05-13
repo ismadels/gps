@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import argparse
 import math
+import os
+import subprocess
 import threading
 import time
 import tkinter as tk
@@ -17,6 +19,11 @@ try:
     import requests
 except ImportError:
     requests = None
+
+try:
+    import pyttsx3
+except ImportError:
+    pyttsx3 = None
 
 from PIL import Image, ImageTk
 
@@ -52,6 +59,12 @@ ZOOM_BY_MAP = {
 # Para no saturar OSM, no descargamos mapa en cada trama si no hace falta.
 MIN_MAP_UPDATE_SECONDS = 2.0
 MIN_MAP_UPDATE_METERS = 8.0
+
+VOICE_ALERT_COOLDOWN_SECONDS = 6.0
+BRAKING_DROP_KMH = 3.0
+BAD_HDOP_THRESHOLD = 4.0
+VOICE_AVAILABLE = pyttsx3 is not None or os.name == "nt"
+DESTINATION_RADIUS_METERS = 8.0
 
 ELLIPSOIDS = {
     "WGS84": {"name": "WGS84", "a": 6378137.0, "f": 1.0 / 298.257223563},
@@ -147,8 +160,8 @@ def map_config_campus_sur() -> MapConfig:
         key="campus",
         title="Campus Sur",
         zone=DEFAULT_ZONE,
-        has_speed_limits=False,
-        track_path=None,
+        has_speed_limits=True,
+        track_path="Mapa_Campus_Sur.txt",
     )
 
 
@@ -445,6 +458,14 @@ def latlon_to_tile_fraction(lat: float, lon: float, zoom: int) -> tuple[float, f
     return x, y
 
 
+def tile_fraction_to_latlon(x_tile: float, y_tile: float, zoom: int) -> tuple[float, float]:
+    n = 2 ** zoom
+    lon = x_tile / n * 360.0 - 180.0
+    lat_rad = math.atan(math.sinh(math.pi * (1.0 - 2.0 * y_tile / n)))
+    lat = math.degrees(lat_rad)
+    return lat, lon
+
+
 def download_osm_tile(z: int, x: int, y: int) -> Image.Image:
     if requests is None:
         raise RuntimeError("Falta requests. Instala con: python -m pip install requests")
@@ -503,9 +524,20 @@ def latlon_to_raw_osm_pixel(lat: float, lon: float, bg: OSMBackground) -> tuple[
     return x_raw, y_raw
 
 
+def raw_osm_pixel_to_latlon(x_raw: float, y_raw: float, bg: OSMBackground) -> tuple[float, float]:
+    x_tile = bg.top_left_tile_x + x_raw / TILE_SIZE
+    y_tile = bg.top_left_tile_y + y_raw / TILE_SIZE
+    return tile_fraction_to_latlon(x_tile, y_tile, bg.zoom)
+
+
 def raw_to_display_pixel(x_raw: float, y_raw: float, raw_size: int, display_size: int) -> tuple[int, int]:
     scale = display_size / raw_size
     return int(round(x_raw * scale)), int(round(y_raw * scale))
+
+
+def display_to_raw_pixel(x_display: float, y_display: float, raw_size: int, display_size: int) -> tuple[float, float]:
+    scale = raw_size / display_size
+    return x_display * scale, y_display * scale
 
 
 # =========================================================
@@ -622,6 +654,38 @@ def speed_state(speed_kmh: float, limit_kmh: float | None) -> tuple[str, str]:
         return "EXCESO", COLOR_ALERT
 
 
+def speak_text(text: str) -> None:
+    if pyttsx3 is not None:
+        try:
+            engine = pyttsx3.init()
+            engine.setProperty("rate", 165)
+            engine.say(text)
+            engine.runAndWait()
+            engine.stop()
+            return
+        except Exception:
+            pass
+
+    if os.name == "nt":
+        escaped_text = text.replace("'", "''")
+        command = (
+            "Add-Type -AssemblyName System.Speech; "
+            "$s = New-Object System.Speech.Synthesis.SpeechSynthesizer; "
+            "$s.Rate = 0; "
+            f"$s.Speak('{escaped_text}')"
+        )
+        try:
+            subprocess.run(
+                ["powershell", "-NoProfile", "-Command", command],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=8,
+                check=False,
+            )
+        except Exception:
+            pass
+
+
 # =========================================================
 # INTERFAZ
 # =========================================================
@@ -647,6 +711,15 @@ class GPSOSMApp:
         self.prev_track_idx: int | None = None
         self.direction_sign: int = 1
         self.speed_history: list[float] = []
+        self.previous_speed_kmh: float | None = None
+        self.last_voice_alert: str | None = None
+        self.last_voice_time: float = 0.0
+        self.destination_select_mode = False
+        self.destination_lat: float | None = None
+        self.destination_lon: float | None = None
+        self.destination_e: float | None = None
+        self.destination_n: float | None = None
+        self.destination_reached = False
 
         self.current_bg: OSMBackground | None = None
         self.current_map_tk: ImageTk.PhotoImage | None = None
@@ -676,6 +749,7 @@ class GPSOSMApp:
         )
         self.canvas.pack(anchor="nw")
         self.map_image_id = self.canvas.create_image(0, 0, anchor="nw")
+        self.canvas.bind("<Button-1>", self.on_map_click)
 
         self.gps_radius = 8
 
@@ -700,14 +774,44 @@ class GPSOSMApp:
         self.limit_var = tk.StringVar(value="Límite actual: no disponible")
         self.alert_var = tk.StringVar(value="Estado: esperando datos GPS")
         self.direction_var = tk.StringVar(value="Sentido: -")
+        self.voice_enabled_var = tk.BooleanVar(value=VOICE_AVAILABLE)
+        self.voice_status_var = tk.StringVar(
+            value="Avisos de voz: activos" if VOICE_AVAILABLE else "Avisos de voz: no disponibles"
+        )
+        self.destination_var = tk.StringVar(value="Destino: no seleccionado")
         self.map_mode_var = tk.StringVar(
-            value="Modo: OSM + límites INSIA" if self.cfg.has_speed_limits else "Modo: OSM sin límites de velocidad"
+            value=f"Modo: OSM + límites {self.cfg.title}" if self.cfg.has_speed_limits else "Modo: OSM sin límites de velocidad"
         )
 
         tk.Label(panel_frame, textvariable=self.map_mode_var, font=("Arial", 13, "bold"), bg="#f7f7f7", wraplength=470, justify="center").pack(pady=2, fill="x")
         tk.Label(panel_frame, textvariable=self.limit_var, font=("Arial", 14, "bold"), bg="#f7f7f7", wraplength=470, justify="center").pack(pady=3, fill="x")
         tk.Label(panel_frame, textvariable=self.alert_var, font=("Arial", 13), bg="#f7f7f7", wraplength=470, justify="center").pack(pady=3, fill="x")
         tk.Label(panel_frame, textvariable=self.direction_var, font=("Arial", 12), bg="#f7f7f7", wraplength=470, justify="center").pack(pady=3, fill="x")
+        tk.Checkbutton(
+            panel_frame,
+            text="Asistente por voz",
+            variable=self.voice_enabled_var,
+            state=tk.NORMAL if VOICE_AVAILABLE else tk.DISABLED,
+            bg="#f7f7f7",
+            font=("Arial", 12, "bold"),
+            anchor="center"
+        ).pack(pady=(8, 2), fill="x")
+        tk.Label(panel_frame, textvariable=self.voice_status_var, font=("Arial", 11), bg="#f7f7f7", wraplength=470, justify="center").pack(pady=2, fill="x")
+        tk.Button(
+            panel_frame,
+            text="Seleccionar destino en el mapa",
+            command=self.enable_destination_selection,
+            font=("Arial", 12, "bold"),
+            bg="#e8f0fe"
+        ).pack(pady=(8, 2), fill="x")
+        tk.Button(
+            panel_frame,
+            text="Borrar destino",
+            command=self.clear_destination,
+            font=("Arial", 11),
+            bg="#eeeeee"
+        ).pack(pady=2, fill="x")
+        tk.Label(panel_frame, textvariable=self.destination_var, font=("Arial", 11), bg="#f7f7f7", wraplength=470, justify="center").pack(pady=2, fill="x")
 
         self.speed_canvas = tk.Canvas(
             panel_frame,
@@ -804,6 +908,76 @@ class GPSOSMApp:
         self.last_map_center_e = easting
         self.last_map_center_n = northing
 
+    def enable_destination_selection(self) -> None:
+        if self.current_bg is None:
+            self.destination_var.set("Destino: espera a que cargue el mapa OSM")
+            return
+
+        self.destination_select_mode = True
+        self.destination_var.set("Destino: haz clic en el mapa")
+
+    def clear_destination(self) -> None:
+        self.destination_select_mode = False
+        self.destination_lat = None
+        self.destination_lon = None
+        self.destination_e = None
+        self.destination_n = None
+        self.destination_reached = False
+        self.destination_var.set("Destino: no seleccionado")
+        self.canvas.delete("destination")
+
+    def on_map_click(self, event: tk.Event) -> None:
+        if not self.destination_select_mode or self.current_bg is None:
+            return
+
+        x_raw, y_raw = display_to_raw_pixel(event.x, event.y, self.current_bg.raw_size, self.display_width)
+        lat, lon = raw_osm_pixel_to_latlon(x_raw, y_raw, self.current_bg)
+        easting, northing, _ = geo_to_utm(lat, lon, "WGS84", self.cfg.zone)
+
+        self.destination_lat = lat
+        self.destination_lon = lon
+        self.destination_e = easting
+        self.destination_n = northing
+        self.destination_reached = False
+        self.destination_select_mode = False
+        self.destination_var.set(
+            f"Destino: lat={lat:.6f}, lon={lon:.6f}, radio={DESTINATION_RADIUS_METERS:.0f} m"
+        )
+        self.draw_destination_marker()
+
+    def draw_destination_marker(self) -> None:
+        self.canvas.delete("destination")
+
+        if self.current_bg is None or self.destination_lat is None or self.destination_lon is None:
+            return
+
+        x_raw, y_raw = latlon_to_raw_osm_pixel(self.destination_lat, self.destination_lon, self.current_bg)
+        x, y = raw_to_display_pixel(x_raw, y_raw, self.current_bg.raw_size, self.display_width)
+
+        r = 10
+        self.canvas.create_oval(x - r, y - r, x + r, y + r, fill="#1E88E5", outline="white", width=3, tags="destination")
+        self.canvas.create_line(x - 14, y, x + 14, y, fill="#1E88E5", width=2, tags="destination")
+        self.canvas.create_line(x, y - 14, x, y + 14, fill="#1E88E5", width=2, tags="destination")
+        self.canvas.create_text(x, y - 24, text="Destino", fill="#1E88E5", font=("Arial", 10, "bold"), tags="destination")
+
+    def check_destination_arrival(self, easting: float, northing: float) -> str | None:
+        if (
+            self.destination_e is None
+            or self.destination_n is None
+            or self.destination_reached
+        ):
+            return None
+
+        distance = euclidean_distance(easting, northing, self.destination_e, self.destination_n)
+        self.destination_var.set(f"Destino: distancia {distance:.1f} m")
+
+        if distance <= DESTINATION_RADIUS_METERS:
+            self.destination_reached = True
+            self.destination_var.set("Destino: has llegado")
+            return "Has llegado a tu destino"
+
+        return None
+
     def draw_trace_and_marker(self, current_lat: float, current_lon: float) -> None:
         self.canvas.delete("trace")
         self.canvas.delete("gps")
@@ -830,6 +1004,7 @@ class GPSOSMApp:
         r = self.gps_radius
         self.canvas.create_oval(x - r, y - r, x + r, y + r, fill="red", outline="black", width=2, tags="gps")
         self.canvas.create_text(x, y - 16, text="GPS", fill="black", font=("Arial", 10, "bold"), tags="gps")
+        self.draw_destination_marker()
 
     def get_best_track_index(self, e: float, n: float) -> int:
         if self.track is None:
@@ -877,6 +1052,50 @@ class GPSOSMApp:
         self.alert_var.set(f"Estado: {status_txt}")
 
         return state, color
+
+    def choose_voice_alert(
+        self,
+        state: str,
+        speed_kmh: float,
+        limit_kmh: float | None,
+        hdop: float,
+    ) -> str | None:
+        if hdop >= BAD_HDOP_THRESHOLD:
+            return "GPS con mala precision"
+
+        if state == "EXCESO":
+            return "Estas superando el limite"
+
+        if state == "CERCA":
+            return "Cuidado, estas cerca del limite"
+
+        if self.previous_speed_kmh is not None:
+            speed_drop = self.previous_speed_kmh - speed_kmh
+            if speed_drop >= BRAKING_DROP_KMH and speed_kmh > 1.0:
+                return "Te estas frenando"
+
+        return None
+
+    def play_voice_alert(self, text: str | None) -> None:
+        if text is None:
+            return
+
+        if not VOICE_AVAILABLE:
+            self.voice_status_var.set("Avisos de voz: no disponibles")
+            return
+
+        if not self.voice_enabled_var.get():
+            self.voice_status_var.set("Avisos de voz: desactivados")
+            return
+
+        now = time.time()
+        if text == self.last_voice_alert and now - self.last_voice_time < VOICE_ALERT_COOLDOWN_SECONDS:
+            return
+
+        self.last_voice_alert = text
+        self.last_voice_time = now
+        self.voice_status_var.set(f"Aviso de voz: {text}")
+        threading.Thread(target=speak_text, args=(text,), daemon=True).start()
 
     def update_position(self, gga: GGAData, rmc_speed_kmh: float | None = None) -> None:
         self.utc_var.set(f"Hora UTC: {gga.time_utc}")
@@ -955,7 +1174,11 @@ class GPSOSMApp:
             self.track_var.set("Punto mapa: no aplica en este mapa")
             self.direction_var.set("Sentido: no evaluado (sin mapa de límites)")
 
-        _, current_color = self.update_speedometer(speed_kmh, limit_kmh)
+        state, current_color = self.update_speedometer(speed_kmh, limit_kmh)
+        destination_alert = self.check_destination_arrival(easting, northing)
+        voice_alert = destination_alert or self.choose_voice_alert(state, speed_kmh, limit_kmh, gga.hdop)
+        self.play_voice_alert(voice_alert)
+        self.previous_speed_kmh = speed_kmh
 
         # Mapa dinámico OSM centrado en la posición actual.
         self.update_osm_background(gga.latitude_deg, gga.longitude_deg, easting, northing)
