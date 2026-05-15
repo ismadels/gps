@@ -1,0 +1,438 @@
+\documentclass[10pt]{article}
+
+% COMPILAR CON pdfLaTeX
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage[]{float}
+
+% IDIOMA
+\usepackage[spanish]{babel}
+
+% MÁRGENES
+\usepackage{geometry}
+\geometry{a4paper, margin=2.2cm}
+
+% COLORES
+\usepackage[dvipsnames]{xcolor}
+
+% MATEMÁTICAS
+\usepackage{amsmath, amssymb}
+\usepackage{mathtools}
+
+% LISTADOS
+\usepackage{enumitem}
+
+% CÓDIGO
+\usepackage{listings}
+\lstdefinestyle{pythonEstilo}{
+        language=Python,
+        basicstyle=\ttfamily\small,
+        keywordstyle=\color{RoyalBlue}\bfseries,
+        commentstyle=\color{green!50!black},
+        stringstyle=\color{BrickRed},
+        numbers=none,
+        breaklines=true,
+        frame=single
+}
+
+% TABLAS
+\usepackage{booktabs}
+\usepackage{multirow}
+
+% OTROS
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{0.4em}
+\usepackage[hidelinks]{hyperref}
+\usepackage{graphicx}
+
+\begin{document}
+
+\begin{center}
+{\Large \bfseries Práctica 4 - Servicio georeferenciado a través de Internet}\\[0.3em]
+{\normalsize Grupo 1 - Sistemas y Servicios de Navegación GPS (2026)}\\[1.2em]
+
+\IfFileExists{LogoETSISI.png}{\includegraphics[width=0.25\textwidth]{LogoETSISI.png}}{\vspace{2em}}
+
+\vspace{0.8em}
+
+\begin{tabular}{rl}
+\textbf{Docentes:} & Dr. Eugenio Naranjo y Dr. Francisco Serradilla \\[0.5em]
+\textbf{Integrantes:} & Ismael De Los Santos \\
+                      & Álex Pérez Carpente \\
+                      & Daniel León \\
+\end{tabular}
+\end{center}
+
+\vspace{0.5em}
+\tableofcontents
+\newpage
+
+% ============================================================
+\section{Introducción}
+% ============================================================
+
+En las prácticas anteriores se desarrolló un sistema de posicionamiento GPS con representación visual sobre mapas estáticos georreferenciados y un sistema de aviso al conductor basado en un mapa electrónico de velocidades. En esta cuarta práctica se da un paso más hacia una solución de navegación completamente funcional: se sustituye la imagen de fondo estática por \textbf{cartografía dinámica obtenida en tiempo real} a través de la API pública de \textbf{OpenStreetMap (OSM)}, eliminando así la restricción geográfica que existía en las prácticas anteriores.
+
+El sistema descarga automáticamente las teselas (\textit{tiles}) de mapa correspondientes a la posición actual del vehículo, componiéndolas en un fondo actualizado mientras el vehículo circula. De esta forma, la aplicación es funcional en \textbf{cualquier localización geográfica}, sin necesidad de imágenes precapturadas.
+
+Toda la funcionalidad desarrollada en la Práctica 3 se mantiene intacta: el mapa electrónico de velocidades, la detección del sentido de la marcha y el sistema de aviso al conductor siguen operativos cuando el sistema se ejecuta en el escenario de la pista de ensayo del INSIA.
+
+Como funcionalidades adicionales se han incorporado un \textbf{asistente por voz} que alerta al conductor de forma audible sobre el estado de la velocidad, y la posibilidad de \textbf{seleccionar un punto de destino} directamente sobre el mapa dinámico, con seguimiento de la distancia restante.
+
+% ============================================================
+\section{Objetivo y entregables}
+% ============================================================
+
+\textbf{Objetivo:} extender la aplicación de la Práctica 3 para sustituir el fondo de mapa estático por cartografía dinámica descargada en tiempo real desde OpenStreetMap, manteniendo la funcionalidad de aviso al conductor, añadiendo guía por voz y soporte para selección de destino sobre el mapa.
+
+\textbf{Entregables:}
+\begin{itemize}[leftmargin=1.2em]
+    \item Código fuente de la aplicación (\texttt{practica4\_gps.py}).
+    \item Mapa electrónico de velocidades (\texttt{Mapa\_INSIA2.txt}) — sin cambios respecto a la Práctica 3.
+    \item Documento PDF con la descripción del trabajo desarrollado (este informe).
+\end{itemize}
+
+% ============================================================
+\section{Herramientas y tecnologías utilizadas}
+% ============================================================
+
+\subsection{OpenStreetMap y el sistema de teselas}
+
+OpenStreetMap es un proyecto de cartografía colaborativa y de acceso libre que proporciona mapas vectoriales y teselas rasterizadas a través de una API pública. En lugar de descargar un mapa completo, el sistema de teselas divide el mundo en imágenes cuadradas de $256 \times 256$ píxeles organizadas en una jerarquía de niveles de zoom (\textit{zoom levels}). A mayor zoom, mayor detalle y mayor número de teselas.
+
+Cada tesela se identifica unívocamente por tres parámetros: nivel de zoom $z$, columna $x$ y fila $y$. La URL de descarga sigue el esquema estándar XYZ:
+
+\[
+\texttt{https://tile.openstreetmap.org/\{z\}/\{x\}/\{y\}.png}
+\]
+
+La correspondencia entre coordenadas geográficas y número de tesela se obtiene mediante las expresiones estándar de la proyección de Mercator:
+
+\[
+x_{tile} = \left\lfloor \frac{lon + 180}{360} \cdot 2^z \right\rfloor
+\]
+
+\[
+y_{tile} = \left\lfloor \left(1 - \frac{\ln\!\left(\tan\phi + \sec\phi\right)}{\pi}\right) \cdot 2^{z-1} \right\rfloor
+\]
+
+donde $\phi$ es la latitud en radianes y $lon$ la longitud en grados.
+
+\subsection{Biblioteca \texttt{requests}}
+
+La biblioteca estándar \texttt{requests} de Python se usa para realizar las peticiones HTTP de descarga de cada tesela. Se incluye la cabecera \texttt{User-Agent} identificativa requerida por la política de uso de OSM:
+
+\begin{lstlisting}[style=pythonEstilo]
+headers = {"User-Agent": "GPS-Practica-UPM/1.0"}
+response = requests.get(url, headers=headers, timeout=8)
+\end{lstlisting}
+
+\subsection{Biblioteca \texttt{Pillow}}
+
+Pillow (\texttt{PIL}) se usa para la manipulación de imágenes de tesela, la composición del mosaico resultante y el escalado a las dimensiones de la ventana:
+
+\begin{lstlisting}[style=pythonEstilo]
+tile = Image.open(BytesIO(response.content)).convert("RGB")
+full_image.paste(tile, (dx * TILE_SIZE, dy * TILE_SIZE))
+resized = bg.image.resize((display_width, display_height))
+tk_img = ImageTk.PhotoImage(resized)
+\end{lstlisting}
+
+\subsection{Módulo \texttt{pyttsx3} y síntesis de voz nativa}
+
+Para el asistente por voz se emplea \texttt{pyttsx3}, una biblioteca de síntesis de voz multiplataforma que opera sin conexión a Internet. En caso de que \texttt{pyttsx3} no esté instalado, el sistema recurre a \texttt{PowerShell} con \texttt{System.Speech} (disponible de forma nativa en Windows) como alternativa. Si ninguna de las dos opciones está disponible, el asistente de voz se desactiva automáticamente sin interrumpir la funcionalidad del resto de la aplicación.
+
+\subsection{Tkinter}
+
+La interfaz gráfica se construye con \texttt{tkinter}, la biblioteca estándar de Python para interfaces gráficas. Se utilizan \texttt{Canvas} para el mapa dinámico y la traza del vehículo, y una combinación de \texttt{Frame}, \texttt{Label} y \texttt{Canvas} secundario para el panel derecho (velocímetro, datos GPS y controles).
+
+% ============================================================
+\section{Arquitectura del sistema}
+% ============================================================
+
+La aplicación mantiene la separación modular establecida en las prácticas anteriores, ampliada con los nuevos subsistemas. Los módulos principales son:
+
+\begin{itemize}[leftmargin=1.2em]
+    \item \textbf{Módulos heredados de la Práctica 3} (sin modificaciones): carga del mapa electrónico (\texttt{load\_track()}), parsers NMEA (\texttt{parse\_gga()}, \texttt{parse\_rmc()}), geodesia (\texttt{geo\_to\_utm()}), cálculo de velocidad con suavizado por media móvil, detección del sentido de la marcha, búsqueda del punto más cercano con ventana circular, y sistema de aviso al conductor con tres estados visuales.
+    \item \textbf{Configuración y datos}: clases \texttt{MapConfig} (ampliada con \texttt{zoom}), \texttt{TrackPoint}, \texttt{GGAData}, \texttt{RMCData} y el nuevo \texttt{OSMBackground}.
+    \item \textbf{Módulo OSM}: conversiones \texttt{latlon\_to\_tile\_fraction()}, \texttt{tile\_fraction\_to\_latlon()}, \texttt{download\_osm\_tile()}, \texttt{build\_osm\_background()}, \texttt{latlon\_to\_raw\_osm\_pixel()} y \texttt{raw\_to\_display\_pixel()}.
+    \item \textbf{Asistente de voz}: función \texttt{speak\_text()} con hilo separado.
+    \item \textbf{Interfaz}: clase \texttt{GPSOSMApp} (refactorización y extensión de \texttt{GPSMultiMapApp}).
+    \item \textbf{Lectura serie}: hilo \texttt{serial\_worker()} con soporte combinado GGA+RMC.
+\end{itemize}
+
+% ============================================================
+\section{Módulo OpenStreetMap}
+% ============================================================
+
+\subsection{Estructura de datos \texttt{OSMBackground}}
+
+El estado del mapa en pantalla se encapsula en el dataclass \texttt{OSMBackground}:
+
+\begin{lstlisting}[style=pythonEstilo]
+@dataclass
+class OSMBackground:
+    image: Image.Image      # Imagen compuesta sin escalar
+    zoom: int               # Nivel de zoom utilizado
+    top_left_tile_x: int    # Tesela superior izquierda (columna)
+    top_left_tile_y: int    # Tesela superior izquierda (fila)
+    raw_size: int           # Tamaño en pixeles del mosaico sin escalar
+\end{lstlisting}
+
+Esta estructura permite calcular las posiciones en pantalla de cualquier coordenada geográfica sin necesidad de repetir las conversiones de proyección.
+
+\subsection{Composición del mosaico}
+
+La función \texttt{build\_osm\_background()} descarga una matriz de $(2r+1) \times (2r+1)$ teselas centrada en la posición actual del vehículo, donde $r$ es el radio de teselas (\texttt{TILES\_RADIUS = 2}, dando un mosaico de $5 \times 5 = 25$ teselas). Las teselas se componen en una única imagen PIL antes de ser redimensionada a las dimensiones del canvas:
+
+\begin{lstlisting}[style=pythonEstilo]
+num_tiles = TILES_RADIUS * 2 + 1   # = 5
+raw_size = num_tiles * TILE_SIZE   # 5 * 256 = 1280 px
+full_image = Image.new("RGB", (raw_size, raw_size), "white")
+
+for dx in range(num_tiles):
+    for dy in range(num_tiles):
+        tile = download_osm_tile(zoom, top_left_x + dx, top_left_y + dy)
+        full_image.paste(tile, (dx * TILE_SIZE, dy * TILE_SIZE))
+\end{lstlisting}
+
+Si una tesela no puede descargarse (error de red, fuera de rango), se sustituye por un rectángulo gris neutro para no interrumpir la ejecución.
+
+\subsection{Conversión entre coordenadas}
+
+El módulo OSM proporciona cuatro conversiones encadenadas:
+
+\begin{enumerate}[leftmargin=1.6em]
+    \item \textbf{Lat/lon $\to$ fracción de tesela} (\texttt{latlon\_to\_tile\_fraction}): posición real dentro de la rejilla de teselas (valor no entero).
+    \item \textbf{Fracción de tesela $\to$ píxel en imagen cruda} (\texttt{latlon\_to\_raw\_osm\_pixel}): multiplicando por \texttt{TILE\_SIZE}.
+    \item \textbf{Píxel crudo $\to$ píxel en pantalla} (\texttt{raw\_to\_display\_pixel}): escala según la relación \texttt{display\_size / raw\_size}.
+    \item \textbf{Inversa: píxel en pantalla $\to$ lat/lon} (\texttt{display\_to\_raw\_pixel} $+$ \texttt{raw\_osm\_pixel\_to\_latlon}): utilizada para la selección de destino al hacer clic en el mapa.
+\end{enumerate}
+
+\subsection{Política de actualización del mapa}
+
+Para no saturar los servidores de OSM y mantener la fluidez de la interfaz, la descarga de un nuevo mosaico está restringida por dos condiciones simultáneas:
+
+\begin{itemize}[leftmargin=1.2em]
+    \item El intervalo desde la última descarga debe ser mayor a \texttt{MIN\_MAP\_UPDATE\_SECONDS = 2{,}0 s}.
+    \item El vehículo debe haberse desplazado más de \texttt{MIN\_MAP\_UPDATE\_METERS = 8{,}0 m} desde el centro del último mosaico.
+\end{itemize}
+
+La descarga se realiza en un \textbf{hilo secundario} (\texttt{threading.Thread}) para no bloquear la interfaz gráfica mientras se accede a la red.
+
+% ============================================================
+\section{Niveles de zoom por escenario}
+% ============================================================
+
+El nivel de zoom OSM determina el detalle cartográfico y el área cubierta por el mosaico. Valores altos muestran más detalle pero cubren menos superficie; valores bajos cubren más área con menos resolución. La aplicación asigna un zoom recomendado para cada escenario predefinido:
+
+\begin{table}[H]
+\centering
+\renewcommand{\arraystretch}{1.2}
+\begin{tabular}{@{}llc@{}}
+\toprule
+\textbf{Escenario} & \textbf{Descripción} & \textbf{Zoom OSM} \\
+\midrule
+\texttt{insia}    & Pista de ensayo INSIA   & 18 \\
+\texttt{campus}   & Campus Sur UPM          & 17 \\
+\texttt{vicalvaro}& Zona de Vicálvaro       & 17 \\
+\bottomrule
+\end{tabular}
+\caption{Niveles de zoom recomendados por escenario. Puede sobreescribirse con \texttt{--zoom}.}
+\label{tab:zoom}
+\end{table}
+
+A zoom 18, cada tesela cubre aproximadamente $150 \times 150$ metros, lo que proporciona un nivel de detalle adecuado para la pista del INSIA. El mosaico de $5 \times 5$ teselas cubre entonces en torno a $750 \times 750$ metros alrededor del vehículo.
+
+% ============================================================
+\section{Asistente por voz}
+% ============================================================
+
+\subsection{Lógica de alertas}
+
+El asistente por voz complementa la interfaz visual con avisos audibles. La función \texttt{choose\_voice\_alert()} determina qué mensaje emitir según el estado actual:
+
+\begin{table}[H]
+\centering
+\renewcommand{\arraystretch}{1.2}
+\begin{tabular}{@{}ll@{}}
+\toprule
+\textbf{Condición} & \textbf{Mensaje de voz} \\
+\midrule
+HDOP $\geq 4{,}0$   & ``GPS con mala precisión'' \\
+Exceso de velocidad & ``Estás superando el límite'' \\
+Cerca del límite    & ``Cuidado, estás cerca del límite'' \\
+Frenada brusca ($\Delta v > 3$ km/h) & ``Te estás frenando'' \\
+Llegada al destino  & ``Has llegado a tu destino'' \\
+\bottomrule
+\end{tabular}
+\caption{Mensajes emitidos por el asistente de voz según el estado del sistema.}
+\label{tab:voz}
+\end{table}
+
+Para evitar repeticiones molestas, cada aviso respeta un período de silencio de \texttt{VOICE\_ALERT\_COOLDOWN\_SECONDS = 6{,}0 s} antes de poder emitirse de nuevo con el mismo texto.
+
+\subsection{Implementación con hilos}
+
+La síntesis de voz se ejecuta en un hilo separado para no bloquear la interfaz gráfica:
+
+\begin{lstlisting}[style=pythonEstilo]
+threading.Thread(target=speak_text, args=(text,), daemon=True).start()
+\end{lstlisting}
+
+La función \texttt{speak\_text()} prueba primero \texttt{pyttsx3}; si no está disponible, recurre a \texttt{PowerShell} con \texttt{System.Speech.Synthesis.SpeechSynthesizer} en Windows.
+
+% ============================================================
+\section{Selección de destino sobre el mapa}
+% ============================================================
+
+Una funcionalidad nueva respecto a la Práctica 3 es la posibilidad de marcar un punto de destino directamente sobre el mapa dinámico. El flujo de interacción es el siguiente:
+
+\begin{enumerate}[leftmargin=1.6em]
+    \item El usuario pulsa el botón \textbf{``Seleccionar destino''}.
+    \item La aplicación entra en modo de selección (\texttt{destination\_select\_mode = True}).
+    \item El siguiente clic sobre el canvas convierte las coordenadas de pantalla en lat/lon (inversión de la proyección OSM) y, a continuación, en coordenadas UTM.
+    \item Se dibuja un marcador azul en el punto seleccionado.
+    \item En cada actualización GPS, la aplicación calcula la distancia euclídea al destino y la muestra en el panel. Cuando la distancia es inferior a \texttt{DESTINATION\_RADIUS\_METERS = 8{,}0 m}, el asistente de voz anuncia la llegada y el marcador se congela.
+\end{enumerate}
+
+El botón \textbf{``Borrar''} elimina el destino y reinicia el estado de llegada.
+
+% ============================================================
+\section{Interfaz gráfica}
+% ============================================================
+
+\subsection{Estructura general}
+
+La ventana principal (geometría $1450 \times 900$ px) se divide en dos áreas:
+
+\begin{itemize}[leftmargin=1.2em]
+    \item \textbf{Panel izquierdo (mapa)}: canvas de $800 \times 800$ px con el mosaico OSM como fondo, la traza coloreada del vehículo, el marcador GPS y el marcador de destino.
+    \item \textbf{Panel derecho (control)}: panel de $520$ px de anchura con cabecera fija y área de scroll que agrupa las secciones de velocidad, modo, voz, destino, datos GPS y posición.
+\end{itemize}
+
+\subsection{Secciones del panel derecho}
+
+\begin{enumerate}[leftmargin=1.6em]
+    \item \textbf{Velocidad actual}: velocidad en grande (32 pt) y velocímetro de tres zonas de color (verde/amarillo/rojo), además del estado textual y el límite vigente.
+    \item \textbf{Modo de operación}: modo activo (con o sin límites) y sentido de la marcha detectado.
+    \item \textbf{Asistente por voz}: interruptor para activar/desactivar la voz y estado del último aviso emitido.
+    \item \textbf{Destino}: botones de selección y borrado, distancia restante o confirmación de llegada.
+    \item \textbf{Datos GPS}: hora UTC, calidad del fix, satélites, HDOP, altitud, latitud y longitud.
+    \item \textbf{Posición y mapa}: coordenadas UTM, píxel en pantalla, punto del mapa electrónico activo y nivel de zoom OSM.
+\end{enumerate}
+
+\subsection{Traza del vehículo}
+
+La traza se almacena como una lista de tuplas \texttt{(lat, lon, color)}, donde el color refleja el estado de velocidad en el momento de la toma. Al redibujar, cada segmento se colorea con el color correspondiente a su extremo final, permitiendo revisar visualmente los tramos con exceso de velocidad.
+
+% ============================================================
+\section{Implementación}
+% ============================================================
+
+\subsection{Lenguaje y dependencias}
+
+La aplicación está escrita en \textbf{Python 3.11}. Las dependencias externas son:
+
+\begin{lstlisting}[style=pythonEstilo]
+python -m pip install pillow pyserial requests pyttsx3
+\end{lstlisting}
+
+\texttt{pyttsx3} es opcional: si no está instalado, el asistente de voz usa el motor nativo de Windows o simplemente se desactiva.
+
+\subsection{Ejecución desde línea de comandos}
+
+Es imprescindible tener instalada la biblioteca \texttt{requests} para que la descarga del mapa OSM funcione. Sin ella, el canvas permanecerá en blanco y la aplicación no podrá mostrar cartografía dinámica:
+
+\begin{lstlisting}[style=pythonEstilo]
+python -m pip install requests
+\end{lstlisting}
+
+\begin{lstlisting}[style=pythonEstilo]
+# Pista INSIA (con limites de velocidad, zoom 18)
+python3 practica4_gps.py --map insia --port COM6 --baud 4800 --track Mapa_INSIA2.txt
+
+# Campus Sur (con limites, zoom 17)
+python3 practica4_gps.py --map campus --port COM6 --baud 4800 --track Mapa_Campus_Sur.txt
+
+# Vicalvaro (Cualquier lugar, zoom 17)
+python3 practica4_gps.py --map vicalvaro --port COM6 --baud 4800
+
+# Vicalvaro (Cualquier lugar, zoom personalizado)
+python3 practica4_gps.py --map vicalvaro --port COM6 --baud 4800 --zoom 25
+
+# Zoom personalizado
+python3 practica4_gps.py --map insia --port COM6 --baud 4800 --zoom 19
+
+
+\end{lstlisting}
+
+
+\subsection{Adaptaciones sobre la Práctica 3}
+
+Las principales diferencias de implementación respecto a la Práctica 3 son:
+
+\begin{itemize}[leftmargin=1.2em]
+    \item Sustitución de la imagen PNG estática por el sistema de teselas OSM: la clase \texttt{GPSMultiMapApp} se refactoriza en \texttt{GPSOSMApp}, que ya no carga ningún archivo de imagen predefinido.
+    \item Incorporación de \texttt{OSMBackground} como fuente de verdad para todas las conversiones de coordenadas a pantalla.
+    \item El hilo serie ahora procesa también sentencias RMC para obtener la velocidad directamente del receptor GPS cuando esté disponible.
+    \item El panel derecho se rediseña con un área de scroll y secciones expandibles, para acomodar las nuevas funcionalidades (voz, destino, zoom) sin sobrecargar la pantalla.
+    \item Se añade el parámetro \texttt{--zoom} en la CLI para permitir ajuste fino por el operador.
+\end{itemize}
+
+% ============================================================
+\section{Resultados y análisis experimental}
+% ============================================================
+
+\begin{figure}[H]
+    \centering
+    % Sustituir por la captura real durante las pruebas
+    \fbox{\parbox{0.75\textwidth}{\centering\vspace{4cm}
+    [Captura de la aplicación durante la demostración en la pista de INSIA]
+    \vspace{4cm}}}
+    \caption{Captura durante la demostración en INSIA (pendiente de pruebas).}
+    \label{fig:captura_insia}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \fbox{\parbox{0.75\textwidth}{\centering\vspace{4cm}
+    [Detalle del panel de velocidad y asistente de voz durante exceso de velocidad]
+    \vspace{4cm}}}
+    \caption{Panel de velocidad mostrando estado de exceso (pendiente de pruebas).}
+    \label{fig:captura_exceso}
+\end{figure}
+
+\textit{Esta sección se completará tras la realización de las pruebas en la pista de ensayo del INSIA. Se analizarán los siguientes aspectos:}
+
+\begin{itemize}[leftmargin=1.2em]
+    \item Velocidad de descarga y actualización del mosaico OSM en la red WiFi de INSIA.
+    \item Latencia de refresco del mapa respecto al movimiento real del vehículo.
+    \item Precisión de la traza coloreada sobre el mapa dinámico.
+    \item Correcto funcionamiento del sistema de aviso al conductor en todos los tramos.
+    \item Funcionamiento del asistente de voz en condiciones reales de conducción.
+    \item Verificación de la detección del sentido de la marcha (horario y antihorario).
+    \item Prueba de la selección de destino y aviso de llegada.
+\end{itemize}
+
+% ============================================================
+\section{Conclusiones}
+% ============================================================
+
+La Práctica 4 extiende con éxito el sistema de navegación GPS de la Práctica 3 eliminando la principal limitación de aquel: la dependencia de imágenes de mapa estáticas georreferenciadas. Al integrar la API de teselas de OpenStreetMap, la aplicación pasa a ser funcional en cualquier localización geográfica, con un fondo cartográfico actualizado en tiempo real.
+
+Toda la funcionalidad de las prácticas anteriores se conserva. El sistema de aviso al conductor (mapa electrónico de velocidades, detección de sentido y alertas visuales) sigue operativo en la pista del INSIA, mientras que en cualquier otro escenario la aplicación actúa como un visor de posición GPS sobre cartografía real.
+
+Las incorporaciones más relevantes respecto a la Práctica 3 son:
+
+\begin{itemize}[leftmargin=1.2em]
+    \item \textbf{Cartografía dinámica OSM}: mosaico de $5 \times 5$ teselas actualizado por posición y tiempo, descargado en hilo secundario para no bloquear la interfaz.
+    \item \textbf{Asistente por voz}: alertas audibles de velocidad, calidad GPS y llegada al destino, con control de frecuencia para evitar saturación.
+    \item \textbf{Selección de destino sobre el mapa}: clic en cualquier punto del mapa dinámico para establecer un destino, con seguimiento de distancia y aviso de llegada.
+    \item \textbf{Soporte de sentencias RMC}: uso preferente de la velocidad proporcionada directamente por el receptor GPS cuando está disponible.
+    \item \textbf{Interfaz rediseñada}: panel derecho con scroll y secciones organizadas para una mejor experiencia de uso.
+\end{itemize}
+
+Como limitaciones actuales, la aplicación requiere conexión a Internet para descargar las teselas; en ausencia de red, el canvas mostrará el último mosaico descargado. Como mejora futura se podría implementar una caché local de teselas para reducir la dependencia de la red y mejorar la fluidez en zonas con cobertura variable.
+
+\end{document}
